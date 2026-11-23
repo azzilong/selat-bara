@@ -1,0 +1,132 @@
+<!-- SELAT BARA — full game shell (step 7: HUD DOM).
+     Re-written in-session under recording 8 (gta6-01, 2026-11-24).
+     HUD (GTA-like): mission top-left, wanted stars + clock top-right,
+     minimap 250x250 + health/armour bottom-left, weapon/ammo/speed
+     bottom-right. Title overlay only for ?scene=title. -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SELAT BARA</title>
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; overflow: hidden;
+    background: #87ceeb; font-family: Verdana, Arial, sans-serif; }
+  #scene { position: fixed; inset: 0; width: 100%; height: 100%;
+    display: block; touch-action: none; }
+  .panel { background: rgba(10, 16, 24, .55); border-radius: 6px;
+    color: #fff; text-shadow: 0 1px 3px rgba(0,0,0,.7); }
+  /* mission — top left */
+  #mission { position: fixed; left: 14px; top: 12px; z-index: 6;
+    padding: 10px 14px; max-width: 340px; }
+  #mission-name { font-size: 19px; font-weight: bold; letter-spacing: 2px;
+    color: #ffd24a; }
+  #mission-obj { font-size: 14px; margin-top: 4px; color: #fff; }
+  #money { font-size: 15px; font-weight: bold; margin-top: 6px; color: #7dff8a; }
+  /* wanted + clock — top right */
+  #wanted { position: fixed; right: 14px; top: 12px; z-index: 6;
+    padding: 8px 14px; text-align: right; }
+  #wanted-stars { font-size: 24px; letter-spacing: 3px; color: #ffcf3d; }
+  #wanted-label { font-size: 11px; letter-spacing: 2px; color: #ffb3b3; }
+  #clock { font-size: 20px; font-weight: bold; color: #fff; margin-top: 2px; }
+  /* minimap + vitals — bottom left */
+  #bl { position: fixed; left: 14px; bottom: 14px; z-index: 6; }
+  #minimap { width: 250px; height: 250px; display: block; border-radius: 6px;
+    border: 2px solid rgba(255,255,255,.65); background: #1d2733; }
+  .bar-row { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+  .bar-label { font-size: 11px; font-weight: bold; color: #fff; width: 52px;
+    text-shadow: 0 1px 3px rgba(0,0,0,.8); }
+  .bar { flex: 1; height: 12px; background: rgba(0,0,0,.55); border-radius: 6px;
+    overflow: hidden; border: 1px solid rgba(255,255,255,.4); }
+  .bar > div { height: 100%; }
+  #health-fill { background: #37c978; width: 100%; }
+  #armour-fill { background: #3b82f6; width: 100%; }
+  .bar-num { font-size: 12px; font-weight: bold; color: #fff; width: 28px;
+    text-align: right; text-shadow: 0 1px 3px rgba(0,0,0,.8); }
+  /* weapon + speed — bottom right */
+  #br { position: fixed; right: 14px; bottom: 14px; z-index: 6; text-align: right; }
+  #weapon { font-size: 20px; font-weight: bold; color: #fff;
+    text-shadow: 0 2px 6px rgba(0,0,0,.8); }
+  #ammo { font-size: 26px; font-weight: bold; color: #ffd24a;
+    text-shadow: 0 2px 6px rgba(0,0,0,.8); }
+  #speed { font-size: 22px; font-weight: bold; color: #fff; margin-top: 4px;
+    text-shadow: 0 2px 6px rgba(0,0,0,.8); }
+  #hint { position: fixed; left: 50%; bottom: 14px; transform: translateX(-50%);
+    z-index: 6; font-size: 12px; color: #fff; padding: 6px 12px; }
+  /* title overlay */
+  #title { position: fixed; inset: 0; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; pointer-events: none;
+    z-index: 5; text-align: center; }
+  #title h1 { margin: 0; font-size: 84px; letter-spacing: 14px; color: #fff;
+    text-shadow: 0 3px 0 #e2571e, 0 8px 22px rgba(0, 0, 0, .4); }
+  #title p.tag { margin: 12px 0 0 0; font-size: 17px; letter-spacing: 4px;
+    color: #fff; text-shadow: 0 2px 8px rgba(0, 0, 0, .5); }
+  #title p.story { margin: 22px 0 0 0; max-width: 560px; font-size: 15px;
+    line-height: 1.6; color: #fff; text-shadow: 0 2px 8px rgba(0,0,0,.6); }
+  #title p.press { margin: 26px 0 0 0; font-size: 16px; font-weight: bold;
+    letter-spacing: 3px; color: #ffd24a; text-shadow: 0 2px 8px rgba(0,0,0,.6); }
+  /* busted / complete overlays */
+  .big-overlay { position: fixed; inset: 0; display: none; flex-direction: column;
+    align-items: center; justify-content: center; z-index: 8; text-align: center;
+    background: rgba(10, 10, 20, .45); }
+  .big-overlay h2 { margin: 0; font-size: 64px; letter-spacing: 10px; color: #fff;
+    text-shadow: 0 4px 20px rgba(0,0,0,.8); }
+  .big-overlay p { font-size: 16px; color: #fff; margin-top: 10px; }
+</style>
+</head>
+<body>
+<canvas id="scene"></canvas>
+
+<div id="hud">
+  <div id="mission" class="panel">
+    <div id="mission-name">M1 · THE GETAWAY</div>
+    <div id="mission-obj">Get in the sports car</div>
+    <div id="money">$ 250</div>
+  </div>
+  <div id="wanted" class="panel">
+    <div id="wanted-stars">☆☆☆☆☆</div>
+    <div id="wanted-label">WANTED</div>
+    <div id="clock">12:00</div>
+  </div>
+  <div id="bl">
+    <canvas id="minimap" width="250" height="250"></canvas>
+    <div class="bar-row"><span class="bar-label">HEALTH</span>
+      <div class="bar"><div id="health-fill"></div></div>
+      <span class="bar-num" id="health-num">100</span></div>
+    <div class="bar-row"><span class="bar-label">ARMOUR</span>
+      <div class="bar"><div id="armour-fill"></div></div>
+      <span class="bar-num" id="armour-num">60</span></div>
+  </div>
+  <div id="br">
+    <div id="weapon">SMG</div>
+    <div id="ammo">30/90</div>
+    <div id="speed">0 KM/H</div>
+  </div>
+  <div id="hint" class="panel">WASD drive / walk &nbsp;·&nbsp; E enter car &nbsp;·&nbsp; Click shoot &nbsp;·&nbsp; R reload</div>
+</div>
+
+<div id="title" style="display:none">
+  <h1>SELAT BARA</h1>
+  <p class="tag">A BRIGHT MIDDAY CITY &middot; ROGUE COURIER vs THE SYNDICATE</p>
+  <p class="story">Raka is a courier who refused one delivery too many. Now the
+    syndicate owns the streets of Selat Bara — and the police own Raka.
+    Three jobs stand between him and the docks: outrun the pursuit,
+    silence the gang, and lose the heat for good.</p>
+  <p class="press">PRESS ENTER TO PLAY</p>
+</div>
+
+<div id="busted" class="big-overlay">
+  <h2>BUSTED</h2>
+  <p>The Saltport PD caught up with you. You respawn at the docks.</p>
+</div>
+<div id="complete" class="big-overlay">
+  <h2>SELAT BARA</h2>
+  <p>Mission complete — the docks are yours. $ 2,500 earned.</p>
+</div>
+
+<script type="importmap">
+{ "imports": { "three": "./vendor/three.module.min.js" } }
+</script>
+<script type="module" src="./src/main.js"></script>
+</body>
+</html>
