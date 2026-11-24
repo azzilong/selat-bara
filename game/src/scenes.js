@@ -1,472 +1,241 @@
-// SELAT BARA — "Mode Bioskop" scene staging (step 6).
-// Re-written in-session under recording 9 (gta6-01, 2026-11-24).
-// ?scene=action1/2/3/title stages an exact, FROZEN dramatic frame:
-// vehicles and NPCs spawned exactly as the brief describes, cinematic
-// camera, full HUD, no random gameplay. The render loop keeps drawing
-// the same frame (light bars keep flashing); nothing moves, so the
-// screenshot is never blurred.
-//
-// REBUILD FIXES (user feedback 2026-11-24 ~02:56-03:00 WIB):
-// #1 heli lowered into frame in action1 (was 33 deg above horizontal,
-//     above the frame top — only the beam showed).
-// #2 police light bars are bigger/brighter (see vehicleBuilder.js).
-// #3 action2: bigger muzzle flash + light, more blood, bodies in frame.
-// #4 action3: hero SEATED INSIDE the car — legs hidden in the cabin,
-//     only head + torso + gun arm above the window line, leaning out
-//     toward the police car (was a full figure floating at door height).
-// #5 bullet tracer + muzzle sparks visible in action2 and action3.
-// #6 a floating drop (cash/ammo + glow ring) above every fallen enemy.
-// REBUILD #3 FIXES (2026-11-24 ~07:05-07:40 WIB):
-// #8 hero action3 SUNK ~0.35u into the cabin so only chest-up shows
-//     above the window line (the old fix left him reading as perched
-//     on the car's rear). The render is the verdict.
-// #9 drops are bigger now (2.0x scale, higher, brighter ring).
-// #10 blood pools under every fallen body + bigger blood particles.
-// #11 every scene wires the full upgraded HUD (fix 11a-11h): stage +
-//     NEXT + progress, district + standing, named police response with
-//     live distances, weapon slots, money with the clock, vehicle +
-//     damage, gold minimap route.
-// FIX #12 (2026-11-24 ~08:05 WIB): drops carry a big gold "$" (cash)
-//     / bullet (ammo) marker above the box, and updateStaged billboards
-//     the drop to face the camera instead of spinning, so the marker
-//     reads at capture time.
+// Selat Bara — "Mode Bioskop": frozen cinematic staging for ?scene=action1/2/3/title.
+// Every scene forces 12:00 midday, a fixed cinematic camera, exact spawns,
+// full HUD, and a frozen dramatic frame (only rotors, light bars, drops and
+// smoke keep moving — the action itself never advances).
 import * as THREE from 'three';
-import {
-  buildSportsCar, buildPoliceCar, buildHelicopter, buildSedan,
-  flashLightBar, animateHeli,
-} from './vehicleBuilder.js';
-import {
-  buildHero, buildEnemy, buildPolice, layFallen, buildDrop, dropRing,
-} from './characterBuilder.js';
-import { makeBloodPool } from './weapons.js';
+import { buildSportsCar, buildPoliceCar, buildHelicopter, buildSedan, flashLightBar, animateHeli } from './vehicleBuilder.js';
+import { buildHero, buildEnemy, buildDrop, buildBloodPool, poseFallen } from './characterBuilder.js';
 
-// helpers ---------------------------------------------------------------
-function place(obj, x, z, ry) {
-  obj.position.set(x, obj.position.y, z);
-  obj.rotation.y = ry;
-  return obj;
+// HUD state per scene. Distances in the police panel are computed live by
+// the HUD from the staged police objects; the values here are the staged
+// anchor positions.
+export const SCENE_HUD = {
+  action1: {
+    mission: 'M1 · THE GETAWAY', stage: 'STAGE 1/3 · STEAL THE CAR',
+    objective: 'Wreck the pursuers', next: 'Lose the heli', progress: 0.25,
+    wanted: 3, wantedText: 'AIR UNIT DEPLOYED', money: 250, clock: '12:00',
+    weapon: 'SMG', mag: 30, reserve: 90, health: 100, armour: 60,
+    speed: 87, vehicle: 'SPORTS CAR', damage: '12% DENTED',
+    district: 'PELABUHAN BARA', street: 'Dermaga Bara', standing: 'NEUTRAL', standingVal: 58,
+    control: 'CONTROL: 3★ — units responding',
+  },
+  action2: {
+    mission: 'M2 · THE BRUTAL SHOOTOUT', stage: 'STAGE 2/3 · CLEAR THE STREET',
+    objective: 'Kill the gang', next: 'Vanish', progress: 0.5,
+    wanted: 2, wantedText: 'UNITS RESPONDING', money: 250, clock: '12:00',
+    weapon: 'SMG', mag: 11, reserve: 48, health: 72, armour: 45,
+    speed: null, vehicle: null, damage: null,
+    district: 'PASAR LAMA', street: 'Jalan Pasar Lama', standing: 'WARY', standingVal: 34,
+    control: 'CONTROL: 2★ — units responding',
+  },
+  action3: {
+    mission: 'M3 · HIGH SPEED CHASE', stage: 'STAGE 3/3 · LOSE THE HEAT',
+    objective: 'Drive-by — lose the heat', next: 'Reach the docks', progress: 0.75,
+    wanted: 3, wantedText: 'AIR UNIT DEPLOYED', money: 250, clock: '12:00',
+    weapon: 'SMG', mag: 24, reserve: 90, health: 88, armour: 50,
+    speed: 112, vehicle: "RAKA'S SPORTS CAR", damage: '18% DENTED',
+    district: 'KOTA TUA', street: 'Jalan Kota Tua', standing: 'NEUTRAL', standingVal: 47,
+    control: 'CONTROL: 3★ — air unit deployed',
+  },
+  title: {
+    mission: null, wanted: 0, money: 250, clock: '12:00',
+    district: 'PELABUHAN BARA', street: 'Dermaga Bara', standing: 'NEUTRAL', standingVal: 58,
+  },
+  map: {
+    mission: 'M1 · THE GETAWAY', stage: 'STAGE 1/3 · STEAL THE CAR',
+    objective: 'Reach the docks', next: 'Lose the heli', progress: 0.4,
+    wanted: 3, wantedText: 'AIR UNIT DEPLOYED', money: 250, clock: '12:00',
+    weapon: 'SMG', mag: 30, reserve: 90, health: 100, armour: 60,
+    speed: null, vehicle: null, damage: null,
+    district: 'PELABUHAN BARA', street: 'Dermaga Bara', standing: 'NEUTRAL', standingVal: 58,
+    control: 'CONTROL: 3★ — units responding',
+  },
+};
+
+function policeCarAt(x, z, ry = 0) {
+  const c = buildPoliceCar();
+  c.position.set(x, 0, z);
+  c.rotation.y = ry;
+  return c;
 }
 
-// Drop helper: float a loot drop above a fallen enemy + a glow ring on
-// the ground below it. Registered in ctx.drops so updateStaged bobs it.
-// FIX #9: scale 2.0 (was 1.4), baseY 1.3 (was 1.15) — the old drops
-// read as tiny boxes at street distance.
-function addDrop(ctx, x, z, kind) {
-  const d = buildDrop(kind);
-  d.position.set(x, 1.3, z);
-  d.scale.setScalar(2.0);
-  d.userData.baseY = 1.3;
-  d.userData.phase = Math.random() * Math.PI * 2;
-  ctx.scene.add(d);
-  const ring = dropRing(kind === 'cash' ? 0x7dff8a : 0xffd24a);
-  ring.position.set(x, 0.06, z);
-  ctx.scene.add(ring);
-  (ctx.drops = ctx.drops || []).push(d);
-  return d;
-}
-
-// Police response rows for the HUD: named units + role + live distance
-// in metres from the hero. entries: [{ mesh | heli, name, role }].
-// Sorted nearest first; shared with main.js for free-roam updates.
-export function buildResponseUnits(heroPos, entries) {
-  const units = entries.map((e) => {
-    const p = e.heli ? e.heli.position : e.mesh.position;
-    // 3D distance: the heli sits ~12u up, so ground distance alone
-    // would read a misleading "8 m" for an air unit overhead.
-    return {
-      name: e.name,
-      role: e.role,
-      dist: Math.hypot(p.x - heroPos.x, (p.y || 0) - (heroPos.y || 0), p.z - heroPos.z),
-    };
-  });
-  units.sort((a, b) => a.dist - b.dist);
-  return units;
-}
-
-// --- SCENE 1: "The Getaway" ---------------------------------------------
-// Hero sports car on the main east-west avenue, 3 police cars in pursuit,
-// heli overhead with the spotlight beam, one police car crashed into a
-// building corner with grey smoke, tyre smoke at the hero's rear wheels.
-// Camera: low chase behind the hero car.
-// REBUILD FIX #1: heli now at (2, 12.5, 0) — ~17 deg above horizontal
-// from the camera, inside the ~24 deg frame top — the helicopter itself
-// is visible in the chase shot, beam still hitting the road.
-export function stageAction1(ctx) {
-  const { scene, camera } = ctx;
-  // Hero flees NORTH (-Z) down the main avenue; police chase from
-  // behind (south), camera sits behind the pursuit — hero ahead,
-  // police between camera and hero, all in frame.
-  const heroCar = buildSportsCar();
-  heroCar.position.set(0, 0, 8);
-  heroCar.rotation.y = 0; // facing -Z
-  scene.add(heroCar);
-  const hero = buildHero();
-  hero.position.set(0, 0, 8);
-  hero.visible = false; // hero is driving; the car is the subject
-  scene.add(hero);
-
-  const police = [];
-  const spots = [[-3.4, 16, 0.12], [3.4, 20, -0.1], [-0.8, 25, 0]];
-  for (const [x, z, ry] of spots) {
-    const p = buildPoliceCar();
-    place(p, x, z, ry);
-    scene.add(p);
-    police.push(p);
-  }
-  // crashed police car: nose into the building corner on the road edge,
-  // smoke from the hood — staged on the RIGHT side so it does not hide
-  // behind the pursuit cars (rebuild framing fix, seen in the render).
-  const crashed = buildPoliceCar();
-  crashed.position.set(6.4, 0, 13);
-  crashed.rotation.y = -Math.PI * 0.62;
-  scene.add(crashed);
-  police.push(crashed);
-  ctx.particles.smoke(new THREE.Vector3(7.4, 1.1, 11.2), 26);
-  ctx.particles.tireSmoke(new THREE.Vector3(-1.2, 0.25, 10.5), 14);
-  ctx.particles.tireSmoke(new THREE.Vector3(1.2, 0.25, 10.5), 14);
-
-  const heli = buildHelicopter();
-  heli.position.set(2, 12.5, 0);
-  heli.rotation.y = 0.6;
-  scene.add(heli);
-  ctx.heli = heli;
-
-  camera.position.set(6.5, 4.0, 28);
-  camera.lookAt(-1, 1.5, 4);
-  camera.fov = 60;
-  camera.updateProjectionMatrix();
-
-  // --- HUD (fix #11) ---
-  ctx.hud.setMission('M1 · THE GETAWAY', 'Wreck the pursuers',
-    'STAGE 1/3 · STEAL THE CAR', 'Lose the heli', 0.15);
-  ctx.hud.setWanted(3);
-  ctx.hud.setMoney(250);
-  ctx.hud.setHealth(100);
-  ctx.hud.setArmour(60);
-  ctx.hud.setAmmo('SMG', 30, 90);
-  ctx.hud.setSlots([
-    { num: 1, label: 'FISTS', ammo: '∞', owned: true },
-    { num: 2, label: 'PISTOL', ammo: '', owned: false },
-    { num: 3, label: 'SMG', ammo: '30/90', owned: true },
-  ], 3);
-  ctx.hud.setDistrict('Pelabuhan Bara', 'Dermaga Bara', 'NEUTRAL', 58);
-  ctx.hud.setResponse(buildResponseUnits(heroCar.position, [
-    { mesh: police[0], name: 'SBPD-7 BARA', role: 'IN PURSUIT' },
-    { mesh: police[1], name: 'SBPD-12 TANJUNG', role: 'IN PURSUIT' },
-    { mesh: police[2], name: 'SBPD-19 KACA', role: 'RAMMING' },
-    { heli, name: 'SBPD-AIR ELANG', role: 'AIR UNIT' },
-  ]), 'CONTROL: 3★ — units responding');
-  ctx.hud.setSpeed(87);
-  ctx.hud.setVehicle('SPORTS CAR', 12);
-  ctx.hud.setRoute([{ x: 0, z: 8 }, { x: -100, z: 0 }]);
-  ctx.hud.showTitle(false);
-  ctx.frozen = true;
-  ctx.policeCars = police;
-  ctx.heroCar = heroCar;
-  return { name: 'action1' };
-}
-
-// --- SCENE 2: "The Brutal Shootout" --------------------------------------
-// Hero behind a wrecked car on the main avenue, firing across the street
-// at 4 armed syndicate enemies; muzzle flash frozen at the gun tip,
-// blood particles frozen mid-air, 2 enemies already fallen.
-// Camera: over-the-shoulder, hero fills 1/3 of the frame.
-// REBUILD FIX #3: big starburst flash + flash light, bloodBig splashes
-// on both hit points and by the fallen bodies.
-// REBUILD FIX #5: a bright yellow tracer beam from the gun tip to the
-// far enemy + a spark burst at the muzzle.
-// REBUILD FIX #6: a cash drop floats above one fallen enemy, an ammo
-// drop above the other, each with a glow ring on the ground.
-// (Also fixed: the hero now actually FACES the enemies — rotation.y 0,
-//  facing -Z; the old build had him turned away from the street.)
-export function stageAction2(ctx) {
-  const { scene, camera } = ctx;
-  // wrecked cover car, angled like a wreck; hero fires AROUND its side
-  // (not hidden behind it), enemies close across the street.
-  const wreck = buildSedan(0x5a6068); // wrecked car, mid-grey so it reads
-  wreck.position.set(0, 0, 6);
-  wreck.rotation.y = Math.PI * 0.14;
-  scene.add(wreck);
-  ctx.particles.smoke(new THREE.Vector3(0, 1.0, 4.2), 22);
-
-  const hero = buildHero();
-  hero.position.set(2.4, 0, 7.8);
-  hero.rotation.y = 0; // facing -Z across the street, at the enemies
-  // aim pose: gun raised to shoulder height, right arm pointing forward
-  const j = hero.userData.joints;
-  j.gun.position.set(0.28, 1.05, -0.3);
-  j.armR.rotation.x = -1.2;
-  j.armL.rotation.x = -0.5;
-  scene.add(hero);
-  ctx.hero = hero;
-
-  // muzzle flash + tracer + sparks frozen at the hero's gun tip
-  const tip = new THREE.Vector3(2.68, 1.1, 6.9);
-  const aim = new THREE.Vector3(-2, 1.2, -11);
-  const dir = aim.clone().sub(tip).normalize();
-  ctx.flash.fire(tip, dir);
-  ctx.flash.life = 999; // keep it visible in the frozen frame
-  ctx.tracer.fire(tip, aim);
-  ctx.tracer.life = 999;
-  ctx.particles.sparks(tip, dir, 24);
-  // blood where the shots land + by the fallen bodies
-  ctx.particles.bloodBig(new THREE.Vector3(-2, 1.2, -11), 26);
-  ctx.particles.bloodBig(new THREE.Vector3(2.5, 1.1, -12), 20);
-  ctx.particles.bloodBig(new THREE.Vector3(2.5, 0.5, -10.5), 14);
-  ctx.particles.bloodBig(new THREE.Vector3(5, 0.5, -11.5), 14);
-
-  // 4 armed enemies across the street; 2 standing and firing, 2 fallen
-  const enemies = [];
-  const eSpots = [[-4.5, -11, 0], [-1, -12, 0], [2.5, -10.5, 0], [5, -11.5, 0]];
-  eSpots.forEach(([x, z], i) => {
-    const e = buildEnemy();
-    if (i < 2) {
-      e.position.set(x, 0, z);
-      e.rotation.y = 0; // facing the hero (+Z)
-      scene.add(e);
-      enemies.push(e);
-    } else {
-      layFallen(e);
-      e.position.set(x, 0.28, z);
-      e.rotation.y = i * 0.7;
-      scene.add(e);
-      // FIX #10: a dark-red blood pool under each fallen body
-      scene.add(makeBloodPool(x, z, i * 0.7));
-    }
-  });
-  // drops floating above the two fallen enemies (fix #6, bigger in #9)
-  addDrop(ctx, 2.5, -10.5, 'cash');
-  addDrop(ctx, 5, -11.5, 'ammo');
-  // a police car arriving at the far end, lights flashing
-  const p = buildPoliceCar();
-  p.position.set(8, 0, -18);
-  p.rotation.y = Math.PI * 0.5;
-  scene.add(p);
-  ctx.policeCars = [p];
-
-  camera.position.set(2.0, 2.4, 14.5);
-  camera.lookAt(-2.5, 1.2, -11);
-  camera.fov = 60;
-  camera.updateProjectionMatrix();
-
-  // --- HUD (fix #11) ---
-  ctx.hud.setMission('M2 · THE BRUTAL SHOOTOUT', 'Kill the gang',
-    'STAGE 2/3 · CLEAR THE STREET', 'Vanish', 0.45);
-  ctx.hud.setWanted(2);
-  ctx.hud.setMoney(250);
-  ctx.hud.setHealth(72);
-  ctx.hud.setArmour(45);
-  ctx.hud.setAmmo('SMG', 11, 48);
-  ctx.hud.setSlots([
-    { num: 1, label: 'FISTS', ammo: '∞', owned: true },
-    { num: 2, label: 'PISTOL', ammo: '', owned: false },
-    { num: 3, label: 'SMG', ammo: '11/48', owned: true },
-  ], 3);
-  ctx.hud.setDistrict('Pasar Lama', 'Jalan Pasar Lama', 'WARY', 34);
-  ctx.hud.setResponse(buildResponseUnits(hero.position, [
-    { mesh: p, name: 'SBPD-7 BARA', role: 'RESPONDING' },
-  ]), 'CONTROL: 2★ — units responding');
-  ctx.hud.setSpeed(null);
-  ctx.hud.setRoute([{ x: 2.4, z: 7.8 }, { x: -2, z: -11 }]);
-  ctx.hud.showTitle(false);
-  ctx.frozen = true;
-  return { name: 'action2' };
-}
-
-// --- SCENE 3: "High Speed Chase" (drive-by) -------------------------------
-// Hero sports car parallel with a police car on the wide main avenue,
-// hero leaning out of the window firing — muzzle flash + shattered
-// glass frozen mid-air. Camera: low side view, both cars in frame.
-// Staging is UNCHANGED from the previous build (user never picked a
-// restage option); only fixes #4 and #5 land here.
-// REBUILD FIX #4: the hero is now SEATED INSIDE the car — his feet at
-// y=0, legs hidden inside the body/cabin, only head + torso + gun arm
-// above the window line, leaning forward toward the police car
-// (rotation.y -PI/2 faces +X, toward the police; torso/head lean
-// forward in local space). The old build stood a full 1.8u figure at
-// door height on the car's edge, which read as pasted onto the door.
-// REBUILD #3 FIX #8: the #4 fix still left him reading as perched on
-// the car's rear — he towered 0.4u above the roofline. He is now SUNK
-// 0.35u into the cabin (y=-0.35) and moved deeper into it (x=-2.85),
-// with a harder lean, so only chest-up shows above the window line.
-// REBUILD FIX #5: tracer beam + sparks from the gun tip to the police car.
-export function stageAction3(ctx) {
-  const { scene, camera } = ctx;
-  // Both cars head NORTH (-Z) on the wide main avenue, staged mid-block
-  // (z ~ 42, clear of the intersection traffic-light poles): hero in
-  // the left lane, police in the right lane. Hero leans out the RIGHT
-  // window (facing +X, toward the police car) and fires. Camera sits
-  // ahead and to the right — front three-quarter view of both cars.
-  const heroCar = buildSportsCar();
-  heroCar.position.set(-3.4, 0, 42);
-  heroCar.rotation.y = 0; // facing -Z
-  scene.add(heroCar);
-  ctx.heroCar = heroCar;
-
-  const police = buildPoliceCar();
-  police.position.set(3.2, 0, 44);
-  police.rotation.y = 0;
-  scene.add(police);
-  ctx.policeCars = [police];
-
-  // hero sunk INTO the cabin (fix #8): y=-0.15, x=-2.55 just inside the
-  // cabin's right edge (x -4.2..-2.6) — the first try (y=-0.35, x=-2.85)
-  // hid him completely behind the roof from the rear-left camera, so
-  // the render showed a floating gun and no driver. Now only head +
-  // shoulders + gun arm clear the window line, leaning out toward the
-  // police car; the legs stay hidden behind the body slab.
-  const hero = buildHero();
-  hero.position.set(-2.55, -0.15, 41.6);
-  hero.rotation.y = -Math.PI / 2; // turned toward the police car (+X)
-  const hj = hero.userData.joints;
-  hj.torso.rotation.x = -0.45; // lean forward, out of the window
-  hj.head.rotation.x = -0.45;
-  hj.armR.rotation.x = -1.3; // gun arm forward toward the police car
-  hj.armL.rotation.x = -0.6;
-  hj.gun.position.set(0.3, 1.25, -0.35); // gun above the window line
-  scene.add(hero);
-  ctx.hero = hero;
-
-  // gun tip world pos: hero local (0.3,1.25,-0.35) -> world offset
-  // (+0.35,+1.25,+0.3) from the hero position
-  const tip = new THREE.Vector3(-1.9, 1.1, 42.1);
-  const aim = new THREE.Vector3(3.2, 1.0, 43.5);
-  const dir3 = aim.clone().sub(tip).normalize();
-  ctx.flash.fire(tip, dir3);
-  ctx.flash.life = 999;
-  ctx.tracer.fire(tip, aim);
-  ctx.tracer.life = 999;
-  ctx.particles.sparks(tip, dir3, 24);
-  ctx.particles.glass(new THREE.Vector3(2.2, 1.3, 43.2), 20);
-  ctx.particles.bloodBig(new THREE.Vector3(3.2, 1.1, 43.8), 16);
-  ctx.particles.tireSmoke(new THREE.Vector3(-4.4, 0.25, 45), 10);
-  ctx.particles.tireSmoke(new THREE.Vector3(4.2, 0.25, 47), 10);
-
-  // heli: at (-2, 7.5, 46) — above the road ahead of the cars, near
-  // the frame's top centre (~25 deg above the view axis, ~13 deg off
-  // centre), so it is actually in the shot. The earlier spots
-  // (-10, 10, 42) and (-10, 8, 42) both sat just outside the top-left
-  // corner once the camera shifted left — the render said "no heli"
-  // twice, so the heli moved to where the frame is.
-  const heli = buildHelicopter();
-  heli.position.set(-2, 7.5, 46);
-  heli.rotation.y = -0.5;
-  scene.add(heli);
-  ctx.heli = heli;
-
-  // Camera shifted left (x -5) so it sees the hero car's RIGHT side —
-  // the side the hero leans out of — instead of only the cars' rears.
-  // The drive-by staging itself (cars, road, positions) is unchanged.
-  camera.position.set(-5, 3.2, 31);
-  camera.lookAt(0, 1.2, 42);
-  camera.fov = 60;
-  camera.updateProjectionMatrix();
-
-  // --- HUD (fix #11) ---
-  ctx.hud.setMission('M3 · HIGH SPEED CHASE', 'Drive-by — lose the heat',
-    'STAGE 3/3 · LOSE THE HEAT', 'Reach the docks', 0.75);
-  ctx.hud.setWanted(3);
-  ctx.hud.setMoney(250);
-  ctx.hud.setHealth(88);
-  ctx.hud.setArmour(50);
-  ctx.hud.setAmmo('SMG', 24, 90);
-  ctx.hud.setSlots([
-    { num: 1, label: 'FISTS', ammo: '∞', owned: true },
-    { num: 2, label: 'PISTOL', ammo: '', owned: false },
-    { num: 3, label: 'SMG', ammo: '24/90', owned: true },
-  ], 3);
-  ctx.hud.setDistrict('Kota Tua', 'Jalan Kota Tua', 'NEUTRAL', 47);
-  ctx.hud.setResponse(buildResponseUnits(heroCar.position, [
-    { mesh: police, name: 'SBPD-12 TANJUNG', role: 'IN PURSUIT' },
-    { heli, name: 'SBPD-AIR ELANG', role: 'AIR UNIT' },
-  ]), 'CONTROL: 3★ — air unit deployed');
-  ctx.hud.setSpeed(112);
-  ctx.hud.setVehicle("RAKA'S SPORTS CAR", 18);
-  ctx.hud.setRoute([{ x: -3.4, z: 42 }, { x: -100, z: 0 }]);
-  ctx.hud.showTitle(false);
-  ctx.frozen = true;
-  return { name: 'action3' };
-}
-
-// --- TITLE: bright midday city, hero car + skyline, title overlay --------
-export function stageTitle(ctx) {
-  const { scene, camera } = ctx;
-  const heroCar = buildSportsCar();
-  heroCar.position.set(0, 0, 14);
-  heroCar.rotation.y = Math.PI * 0.85;
-  scene.add(heroCar);
-  ctx.heroCar = heroCar;
-
-  const hero = buildHero();
-  hero.position.set(2.2, 0, 15.5);
-  hero.rotation.y = -0.6;
-  scene.add(hero);
-  ctx.hero = hero;
-
-  const p1 = buildPoliceCar();
-  p1.position.set(-14, 0, 22);
-  p1.rotation.y = Math.PI * 1.1;
-  scene.add(p1);
-  const p2 = buildSedan(0x2e86c1);
-  p2.position.set(9, 0, 30);
-  p2.rotation.y = Math.PI * 0.9;
-  scene.add(p2);
-  ctx.policeCars = [p1];
-
-  camera.position.set(0, 8, 44);
-  camera.lookAt(0, 2, -10);
-  camera.fov = 60;
-  camera.updateProjectionMatrix();
-
-  // --- HUD (fix #11): title hides the HUD, but set sane values anyway ---
-  ctx.hud.setMission('', '');
-  ctx.hud.setWanted(0);
-  ctx.hud.setMoney(250);
-  ctx.hud.setHealth(100);
-  ctx.hud.setArmour(100);
-  ctx.hud.setAmmo('SMG', 30, 90);
-  ctx.hud.setSlots([
-    { num: 1, label: 'FISTS', ammo: '∞', owned: true },
-    { num: 2, label: 'PISTOL', ammo: '', owned: false },
-    { num: 3, label: 'SMG', ammo: '30/90', owned: true },
-  ], 3);
-  ctx.hud.setDistrict('Pelabuhan Bara', 'Dermaga Bara', 'NEUTRAL', 58);
-  ctx.hud.setResponse([], '');
-  ctx.hud.setSpeed(null);
-  ctx.hud.showTitle(true);
-  ctx.frozen = true;
-  return { name: 'title' };
-}
-
-// dispatch by URL param
 export function stageScene(name, ctx) {
-  if (name === 'action1') return stageAction1(ctx);
-  if (name === 'action2') return stageAction2(ctx);
-  if (name === 'action3') return stageAction3(ctx);
-  return stageTitle(ctx);
-}
+  const { scene, camera, rig, particles, flash, tracer } = ctx;
+  const staged = new THREE.Group();
+  scene.add(staged);
+  const police = []; // { name, role, obj }
+  const drops = [];
+  const helis = [];
+  const smokeSpots = [];
+  let flashJob = null; // { pos, dir, target } re-fired every frame (frozen flash)
+  let tracerJob = null; // { from, to }
+  let playerPos = new THREE.Vector3(0, 0, 12);
+  let routeTarget = null; // mission target for the gold route (map scene)
 
-// per-frame upkeep for staged scenes (light bars flash, rotors spin,
-// drops bob). Runs in the frozen loop, so the frame stays dramatic
-// but never blurs.
-export function updateStaged(ctx, dt, time) {
-  if (ctx.policeCars) {
-    const phase = Math.floor(time * 4);
-    for (const p of ctx.policeCars) flashLightBar(p, phase);
+  const addPolice = (name, role, x, z, ry = 0) => {
+    const c = policeCarAt(x, z, ry);
+    staged.add(c);
+    police.push({ name, role, obj: c });
+    return c;
+  };
+
+  if (name === 'action1') {
+    // The getaway: hero sports car mid-road, 3 police closing in, one
+    // crashed car smoking, heli overhead with its beam on the road.
+    const heroCar = buildSportsCar(0xd42a1e);
+    heroCar.position.set(0, 0, 12);
+    staged.add(heroCar);
+    playerPos = heroCar.position;
+    addPolice('SBPD-7 BARA', 'IN PURSUIT', 2.0, 19);
+    addPolice('SBPD-12 TANJUNG', 'IN PURSUIT', -4.6, 17);
+    addPolice('SBPD-19 KACA', 'RAMMING', 4.8, 14.5);
+    const crash = buildSedan(0xe86a1a);
+    crash.position.set(-1.5, 0, 4);
+    crash.rotation.set(0, 0.5, 0.1);
+    staged.add(crash);
+    smokeSpots.push(new THREE.Vector3(-1.5, 1.1, 2.2));
+    const heli = buildHelicopter();
+    heli.position.set(2, 11, 2);
+    staged.add(heli);
+    helis.push(heli);
+    police.push({ name: 'SBPD-AIR ELANG', role: 'AIR UNIT', obj: heli });
+    rig.snap([6.5, 4, 28], [0, 1.5, 4], 60);
+  } else if (name === 'action2') {
+    // The brutal shootout: hero behind a wrecked car, 4 gang gunmen across
+    // the street, 2 already down with drops + blood pools, frozen flash.
+    const wreck = buildSedan(0x5a6068);
+    wreck.position.set(-1.2, 0, 13);
+    wreck.rotation.y = 0.35;
+    staged.add(wreck);
+    const hero = buildHero();
+    hero.position.set(1.6, 0, 16.5);
+    hero.rotation.y = 0; // faces -Z, at the gang
+    staged.add(hero);
+    playerPos = hero.position;
+    const gangSpots = [[-4, 0], [-1.5, -1], [1.5, -2], [4, 1]];
+    const gang = [];
+    for (const [gx, gz] of gangSpots) {
+      const e = buildEnemy();
+      e.position.set(gx, 0, gz);
+      e.rotation.y = Math.PI; // faces +Z, at the hero
+      staged.add(e);
+      gang.push(e);
+    }
+    // two fallen gunmen + blood pools + drops
+    const fallenSpots = [[2.5, 4, 'cash'], [-2.5, 2.5, 'ammo']];
+    for (const [fx, fz, kind] of fallenSpots) {
+      const f = buildEnemy();
+      f.position.set(fx, 0, fz);
+      f.rotation.y = Math.PI / 2;
+      poseFallen(f);
+      staged.add(f);
+      const pool = buildBloodPool();
+      pool.position.set(fx, 0.02, fz);
+      staged.add(pool);
+      const drop = buildDrop(kind);
+      drop.position.set(fx, 1.3, fz);
+      staged.add(drop);
+      drops.push(drop);
+      particles.blood(new THREE.Vector3(fx, 0.4, fz), true);
+    }
+    // frozen muzzle flash + tracer + blood at the hit gunman
+    const muzzle = new THREE.Vector3(1.95, 1.35, 15.5);
+    const hit = new THREE.Vector3(-1.5, 1.2, -1);
+    flashJob = { pos: muzzle, dir: hit.clone().sub(muzzle).normalize() };
+    tracerJob = { from: muzzle, to: hit };
+    particles.blood(hit, true);
+    particles.sparks(muzzle);
+    // one distant unit for the response panel's live distance
+    addPolice('SBPD-7 BARA', 'RESPONDING', 5, -14, Math.PI);
+    rig.snap([0.5, 3.2, 24.5], [0, 1.0, -2], 60);
+  } else if (name === 'action3') {
+    // Drive-by: hero car + police car side by side, hero leaning OUT of
+    // his window (seated inside the cabin, only head/torso/gun arm above
+    // the window line), heli overhead, frozen flash + tracer + glass.
+    const heroCar = buildSportsCar(0xd42a1e);
+    heroCar.position.set(3, 0, 43);
+    staged.add(heroCar);
+    playerPos = heroCar.position;
+    addPolice('SBPD-12 TANJUNG', 'IN PURSUIT', -3.2, 41.5);
+    // hero seated INSIDE the car: sunk into the cabin (y -0.15), just
+    // inside the left edge, leaning toward the police car (-X).
+    const seat = new THREE.Group();
+    seat.position.set(2.2, -0.05, 42.6);
+    seat.rotation.y = Math.PI / 2; // faces -X, at the police car
+    const hero = buildHero();
+    hero.rotation.z = 0.4; // lean out toward the police car
+    seat.add(hero);
+    staged.add(seat);
+    const muzzle = new THREE.Vector3(0.9, 1.15, 42.4);
+    const hit = new THREE.Vector3(-2.4, 1.0, 41.8);
+    flashJob = { pos: muzzle, dir: hit.clone().sub(muzzle).normalize() };
+    tracerJob = { from: muzzle, to: hit };
+    particles.glass(new THREE.Vector3(-2.5, 1.2, 41.8));
+    particles.sparks(muzzle);
+    const heli = buildHelicopter();
+    heli.position.set(0, 6.8, 40);
+    staged.add(heli);
+    helis.push(heli);
+    police.push({ name: 'SBPD-AIR ELANG', role: 'AIR UNIT', obj: heli });
+    const far = buildSedan(0x1a1a1a);
+    far.position.set(1, 0, 10);
+    staged.add(far);
+    rig.snap([-5.5, 3.4, 55], [0, 1.2, 40], 60);
+  } else if (name === 'map') {
+    // Full city map: oblique aerial behind the big-map panel. Hero car +
+    // 3 police + heli staged ON real roads (so the PD panel distances and
+    // the big-map markers are live); the mission target is the docks —
+    // the gold route's end, labelled on the map.
+    const heroCar = buildSportsCar(0xd42a1e);
+    heroCar.position.set(0, 0, 12);
+    staged.add(heroCar);
+    playerPos = heroCar.position;
+    addPolice('SBPD-7 BARA', 'IN PURSUIT', 21, -21);
+    addPolice('SBPD-12 TANJUNG', 'IN PURSUIT', -42, 42);
+    addPolice('SBPD-19 KACA', 'RAMMING', 42, 0);
+    const heli = buildHelicopter();
+    heli.position.set(-21, 14, -42);
+    staged.add(heli);
+    helis.push(heli);
+    police.push({ name: 'SBPD-AIR ELANG', role: 'AIR UNIT', obj: heli });
+    routeTarget = new THREE.Vector3(-88, 0, 40);
+    rig.snap([0, 70, 25], [0, 0, 0], 55);
+  } else {
+    // title: bright midday avenue, hero car centre, police + sedan flanking
+    const heroCar = buildSportsCar(0xd42a1e);
+    heroCar.position.set(0, 0, 10);
+    staged.add(heroCar);
+    const pc = policeCarAt(-8, 14, 0);
+    staged.add(pc);
+    const sedan = buildSedan(0x2e6fb0);
+    sedan.position.set(8, 0, 16);
+    staged.add(sedan);
+    const hero = buildHero();
+    hero.position.set(1.8, 0, 12.5);
+    hero.rotation.y = Math.PI;
+    staged.add(hero);
+    rig.snap([0, 4, 34], [0, 2.5, -20], 58);
   }
-  if (ctx.heli) animateHeli(ctx.heli, dt * 0.25); // slow rotor in frozen shots
-  if (ctx.drops) {
-    for (const d of ctx.drops) {
-      d.position.y = d.userData.baseY + Math.sin(time * 2 + d.userData.phase) * 0.12;
-      // FIX #12: face the camera instead of spinning — the "$" / bullet
-      // marker must read at capture time, not spin away from the lens.
-      if (ctx.camera) {
-        d.rotation.y = Math.atan2(
-          ctx.camera.position.x - d.position.x,
-          ctx.camera.position.z - d.position.z);
-      } else {
-        d.rotation.y += dt * 1.2;
-      }
+
+  let smokeTimer = 0;
+  function update(dt, t) {
+    for (const h of helis) animateHeli(h, dt, t);
+    for (const p of police) {
+      if (p.obj.userData.lightBar) flashLightBar(p.obj, t);
+    }
+    for (const d of drops) {
+      d.position.y = d.userData.baseY + Math.sin(t * 2 + d.position.x) * 0.08;
+      // billboard: face the camera, stay upright
+      d.rotation.y = Math.atan2(camera.position.x - d.position.x, camera.position.z - d.position.z);
+    }
+    if (flashJob) flash.show(flashJob.pos, flashJob.dir);
+    if (tracerJob) tracer.fire(tracerJob.from, tracerJob.to);
+    smokeTimer += dt;
+    if (smokeTimer > 0.25) {
+      smokeTimer = 0;
+      for (const s of smokeSpots) particles.smoke(s, 8);
     }
   }
+
+  return { staged, police, playerPos, routeTarget, hud: SCENE_HUD[name] || SCENE_HUD.title, update };
 }

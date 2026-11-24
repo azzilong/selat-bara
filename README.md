@@ -4,50 +4,46 @@
 [![Selat Bara rank](https://make.fun/badge/gta6-01/azzilong/selat-bara/rank.svg)](https://make.fun/bounty/gta6-01)
 [![Selat Bara reward](https://make.fun/badge/gta6-01/azzilong/selat-bara/reward.svg)](https://make.fun/bounty/gta6-01)
 
-**Selat Bara** is a 3D low-poly open-world crime game built for
-[make.fun's "Make GTA 6" bounty](https://make.fun/bounty/gta6-01).
-Play it offline in a desktop browser — no network, no build step.
+An original open-world crime game built for [make.fun's "Make GTA 6" bounty](https://make.fun/bounty/gta6-01).
+Low-poly, bright solid flat colours, no textures — a sunny midday city, a rogue courier, and the
+Selat Bara PD on his tail.
 
-## The story
+## Story
 
-Raka is a courier who refused one delivery too many. Now the syndicate
-owns the streets of Selat Bara — and the Selat Bara PD owns Raka. Three jobs
-stand between him and the docks: outrun the pursuit, silence the gang,
-and lose the heat for good.
+Raka is a courier who refused one delivery too many. Now the syndicate owns the streets of
+Selat Bara — and the police own Raka. Three jobs stand between him and the docks: outrun the
+pursuit, silence the gang, and lose the heat for good.
 
-## The city
+## Features
 
-Five named districts across a dense 8x8 grid — Pelabuhan Bara (the
-harbour, beach and bright blue sea on the west side), Kota Tua, Pasar
-Lama, Distrik Kaca and Tanjung Emas. Buildings stand 2–4 floors with
-bright facades and a window on every floor, palms line the main avenues,
-and the roads are wide enough for three cars abreast. Traffic drives the
-avenues, pedestrians stroll the sidewalks, and the sun never sets on
-midday.
-
-## Missions
-
-- **M1 · The Getaway** — steal the sports car and reach the docks while
-  three police cars and a helicopter run you down. Wanted 3 stars.
-- **M2 · The Brutal Shootout** — hold the wrecked car as cover and take
-  down four armed syndicate enforcers across the street.
-- **M3 · High Speed Chase** — drive-by the patrol car beside you and lose
-  the heat for good.
+- **A living midday city** — a dense 8×8 grid across five districts (Pelabuhan Bara, Kota Tua,
+  Pasar Lama, Distrik Kaca, Tanjung Emas), every building windowed with rooftop props, neon
+  shop signs, palms, a beach and bright blue sea on the west side, and wide roads with
+  double yellow lines.
+- **Three missions** — M1 *The Getaway* (outrun three police cars under the police heli),
+  M2 *The Brutal Shootout* (clear the gang from the street, muzzle flashes, blood, drops),
+  M3 *High Speed Chase* (drive-by shooting from inside the car).
+- **GTA-style systems** — wanted stars with a live Selat Bara PD response panel, health and
+  armour, weapon slots (fists / pistol / SMG), money and clock, a gold-bordered minimap with
+  a mission route line and wanted radius, and a speedometer with vehicle damage.
+- **"Mode Bioskop"** — frozen cinematic staging via URL: `?scene=action1` (police chase),
+  `?scene=action2` (street shootout), `?scene=action3` (drive-by), `?scene=title` (title
+  screen over the bright city). Every scene is locked at 12:00 with the full HUD.
+- **Pure procedural Three.js** — every car, character, building and effect is built from
+  boxes and cylinders in code. No textures, no GLB/GLTF, no network while playing.
 
 ## How to play
 
-Open `game/index.html` in a desktop browser (or serve the `game/`
-folder with any static server). WASD to walk or drive, E to enter and
-exit the car, click to shoot, R to reload, drag the mouse to look
-around. The HUD shows the mission, wanted stars, health and armour,
-weapon and ammo, speed, and a live minimap — plus a named police
-response panel, district standing, and three weapon slots.
+Open `game/index.html` in a browser (serve the `game/` folder over HTTP, e.g.
+`python3 -m http.server` inside `game/`).
 
-For the staged action shots, open `game/index.html?scene=action1`,
-`?scene=action2`, `?scene=action3` or `?scene=title` — each loads a
-frozen cinematic frame at 12:00 sharp.
+- **WASD / arrows** — move (on foot) or drive (in a car)
+- **E** — enter / exit the car
+- **Click / Space** — shoot the SMG
+- **R** — reload
+- **1 / 3** — switch between fists and SMG
+- **Enter** — start from the title screen
 
-## Built with
-
-Three.js (vendored under `game/vendor/`), plain static files, procedural
-geometry only — no textures, no GLB, no network while playing.
+Selat Bara is original work built for the make.fun "Make GTA 6" bounty:
+its own name, districts, story, characters and colours. Three.js r160 is
+vendored under `game/vendor/`.

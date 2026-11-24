@@ -1,233 +1,135 @@
-// SELAT BARA — weapon system (step 5).
-// Re-written in-session under recording 9 (gta6-01, 2026-11-24).
-// Shoot (raycast vs targets), muzzle flash = glowing yellow box at the
-// gun tip, blood = small red (0xCC0000) box particles, car damage =
-// grey smoke puffs from the hood, shattered glass = pale shards. All
-// particles are plain boxes, no textures. One shared particle pool
-// keeps the scene cheap.
-// REBUILD FIX #3: the muzzle flash is now BIG — a fat glowing core plus
-// a star cross and a real PointLight, so the frozen shootout frame
-// reads as a gunshot, not a speck. Blood counts are up too.
-// REBUILD FIX #5: Tracer — a bright yellow beam from the gun tip to the
-// target — plus a spark burst at the muzzle, so the bullet path is
-// visible in the action2/action3 frozen frames.
-// REBUILD #3 FIX #10: blood now also POOLS — a flat dark-red slab under
-// every fallen body — plus even bigger blood particles, so the red
-// actually reads in the wide shootout frame.
+// Selat Bara — weapons: particle pool (blood / smoke / glass / sparks),
+// muzzle flash starburst, bright yellow bullet tracer, simple raycast shots.
 import * as THREE from 'three';
 
-const unitBox = new THREE.BoxGeometry(1, 1, 1);
-const matCache = new Map();
-const MAT = (c) => {
-  if (!matCache.has(c)) {
-    matCache.set(c, new THREE.MeshLambertMaterial({ color: c }));
-  }
-  return matCache.get(c);
-};
-const FLASH_MAT = new THREE.MeshLambertMaterial({
-  color: 0xffe14a, emissive: 0xffc400, emissiveIntensity: 2.6 });
-const FLASH_MAT_HOT = new THREE.MeshLambertMaterial({
-  color: 0xfffbe0, emissive: 0xffffff, emissiveIntensity: 3.0 });
-const TRACER_MAT = new THREE.MeshLambertMaterial({
-  color: 0xffe14a, emissive: 0xffc400, emissiveIntensity: 3.2 });
-
-// --- particle pool: small boxes with velocity + life ----------------------
+// Pooled small-box particles, one InstancedMesh, gravity + fade by scale.
 export class Particles {
-  constructor(scene, max = 260) {
-    this.scene = scene;
-    this.pool = [];
-    for (let i = 0; i < max; i++) {
-      const m = new THREE.Mesh(unitBox, MAT(0xffffff));
-      m.visible = false;
-      m.castShadow = false;
-      scene.add(m);
-      this.pool.push({ mesh: m, vel: new THREE.Vector3(), life: 0, maxLife: 1, grav: 0 });
+  constructor(scene, max = 400) {
+    this.max = max;
+    this.items = [];
+    this.mesh = new THREE.InstancedMesh(
+      new THREE.BoxGeometry(0.16, 0.16, 0.16),
+      new THREE.MeshLambertMaterial({ color: 0xffffff }),
+      max,
+    );
+    this.mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    this.mesh.frustumCulled = false;
+    this.dummy = new THREE.Object3D();
+    this.color = new THREE.Color();
+    scene.add(this.mesh);
+    for (let i = 0; i < max; i++) this.dummy.position.set(0, -50, 0), this.dummy.updateMatrix(), this.mesh.setMatrixAt(i, this.dummy.matrix);
+  }
+  burst(pos, color, n, speed = 4, up = 3, size = 1) {
+    for (let k = 0; k < n; k++) {
+      const i = this.items.findIndex((it) => it.life <= 0);
+      const slot = i >= 0 ? i : this.items.length < this.max ? this.items.length : Math.floor(Math.random() * this.max);
+      if (this.items.length <= slot) this.items.push({});
+      this.items[slot] = {
+        life: 0.7 + Math.random() * 0.5,
+        maxLife: 1,
+        pos: pos.clone(),
+        vel: new THREE.Vector3((Math.random() - 0.5) * speed, Math.random() * up, (Math.random() - 0.5) * speed),
+        color, size,
+      };
+      this.items[slot].maxLife = this.items[slot].life;
     }
-    this.next = 0;
   }
-  spawn(pos, color, count, spread, up, life, size, grav = 9) {
-    for (let n = 0; n < count; n++) {
-      const p = this.pool[this.next];
-      this.next = (this.next + 1) % this.pool.length;
-      p.mesh.visible = true;
-      p.mesh.material = MAT(color);
-      p.mesh.position.copy(pos);
-      p.mesh.scale.setScalar(size * (0.7 + Math.random() * 0.6));
-      p.mesh.rotation.set(Math.random() * 3, Math.random() * 3, Math.random() * 3);
-      p.vel.set(
-        (Math.random() - 0.5) * spread,
-        Math.random() * up,
-        (Math.random() - 0.5) * spread);
-      p.life = life * (0.7 + Math.random() * 0.6);
-      p.maxLife = p.life;
-      p.grav = grav;
-    }
+  blood(pos, big = false) {
+    this.burst(pos, 0xcc0000, big ? 34 : 14, big ? 5 : 3.5, big ? 4 : 2.5, big ? 1.8 : 1);
   }
-  blood(pos, count = 14) {
-    this.spawn(pos, 0xcc0000, count, 3.2, 2.4, 0.7, 0.14);
+  smoke(pos, n = 10) {
+    this.burst(pos, 0x777777, n, 1.2, 2.2, 4);
   }
-  // REBUILD FIX #3: bigger, chunkier blood — visible from across the street.
-  // REBUILD #3 FIX #10: even bigger now (0.28) with more particles.
-  bloodBig(pos, count = 34) {
-    this.spawn(pos, 0xcc0000, count, 4.6, 3.2, 1.0, 0.28);
-    this.spawn(pos, 0x8f0000, Math.floor(count / 2), 2.6, 1.8, 1.2, 0.2);
+  glass(pos) {
+    this.burst(pos, 0x9fc4d8, 16, 5, 3, 0.8);
   }
-  smoke(pos, count = 10) {
-    this.spawn(pos, 0x8a8a8a, count, 1.2, 2.6, 1.6, 0.3, -1.5); // rises
-  }
-  tireSmoke(pos, count = 8) {
-    this.spawn(pos, 0x9a9a9a, count, 1.6, 1.2, 0.9, 0.34, -1);
-  }
-  glass(pos, count = 16) {
-    this.spawn(pos, 0xcfe8f5, count, 4.5, 2.0, 0.8, 0.1);
-  }
-  // REBUILD FIX #5: muzzle sparks — bright yellow-white chips bursting
-  // forward from the gun tip, frozen mid-burst in the staged frames.
-  sparks(pos, dir, count = 22) {
-    for (let n = 0; n < count; n++) {
-      const p = this.pool[this.next];
-      this.next = (this.next + 1) % this.pool.length;
-      p.mesh.visible = true;
-      p.mesh.material = n % 3 === 0 ? FLASH_MAT_HOT : MAT(0xffc400);
-      p.mesh.position.copy(pos);
-      p.mesh.scale.setScalar(0.09 * (0.7 + Math.random() * 0.8));
-      p.mesh.rotation.set(Math.random() * 3, Math.random() * 3, Math.random() * 3);
-      // mostly forward along the shot, with a sideways spray
-      p.vel.copy(dir).multiplyScalar(3 + Math.random() * 7);
-      p.vel.x += (Math.random() - 0.5) * 4;
-      p.vel.y += (Math.random() - 0.2) * 3.5;
-      p.vel.z += (Math.random() - 0.5) * 4;
-      p.life = 0.55 * (0.7 + Math.random() * 0.6);
-      p.maxLife = p.life;
-      p.grav = 6;
-    }
+  sparks(pos) {
+    this.burst(pos, 0xffc81a, 18, 7, 4, 0.9);
   }
   update(dt) {
-    for (const p of this.pool) {
-      if (!p.mesh.visible) continue;
-      p.life -= dt;
-      if (p.life <= 0) { p.mesh.visible = false; continue; }
-      p.vel.y -= p.grav * dt;
-      p.mesh.position.addScaledVector(p.vel, dt);
-      if (p.mesh.position.y < 0.05) {
-        p.mesh.position.y = 0.05;
-        p.vel.y = 0;
-        p.vel.x *= 0.9;
-        p.vel.z *= 0.9;
-      }
-      const s = p.life / p.maxLife;
-      p.mesh.scale.setScalar(Math.max(0.02, p.mesh.scale.x * (0.4 + 0.6 * s)));
+    for (let i = 0; i < this.items.length; i++) {
+      const it = this.items[i];
+      if (!it || it.life <= 0) continue;
+      it.life -= dt;
+      it.vel.y -= 9 * dt;
+      it.pos.addScaledVector(it.vel, dt);
+      if (it.pos.y < 0.08) { it.pos.y = 0.08; it.vel.set(0, 0, 0); }
+      const s = it.size * Math.max(0.15, it.life / it.maxLife);
+      this.dummy.position.copy(it.pos);
+      this.dummy.scale.setScalar(s);
+      this.dummy.rotation.set(it.life * 5, it.life * 7, 0);
+      this.dummy.updateMatrix();
+      this.mesh.setMatrixAt(i, this.dummy.matrix);
+      this.color.setHex(it.color);
+      this.mesh.setColorAt(i, this.color);
     }
+    this.mesh.instanceMatrix.needsUpdate = true;
+    if (this.mesh.instanceColor) this.mesh.instanceColor.needsUpdate = true;
   }
 }
 
-// --- blood pool: flat dark-red slab under a fallen body (FIX #10) ---------
-// A static mesh (not a particle) so the red stays put in the frozen
-// frame. Slight emissive so it reads even in shade.
-export function makeBloodPool(x, z, ry = 0) {
-  const m = new THREE.Mesh(
-    unitBox,
-    new THREE.MeshLambertMaterial({
-      color: 0x8f0000, emissive: 0x5a0000, emissiveIntensity: 0.55 }));
-  m.scale.set(1.9, 0.05, 1.1);
-  m.position.set(x, 0.14, z);
-  m.rotation.y = ry;
-  m.receiveShadow = true;
-  return m;
-}
-
-// --- muzzle flash: big glowing star at the gun tip ------------------------
-// REBUILD FIX #3: the old 0.22u box did not read. The flash is now a
-// group — a fat hot core (0.55u) + a horizontal bar + a vertical bar
-// (the classic starburst) — plus a PointLight that actually lights the
-// shooter and the street for the frozen frame.
+// Big starburst muzzle flash: hot core + cross bars + a point light.
 export class MuzzleFlash {
   constructor(scene) {
     this.group = new THREE.Group();
+    const hot = new THREE.MeshLambertMaterial({ color: 0xffe95a, emissive: 0xffd21a, emissiveIntensity: 4 });
+    const core = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.38, 0.38), hot);
+    const barH = new THREE.Mesh(new THREE.BoxGeometry(0.85, 0.13, 0.13), hot);
+    const barV = new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.85, 0.13), hot);
+    const barD = new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.13, 0.75), hot);
+    this.light = new THREE.PointLight(0xffd21a, 30, 12, 1.5);
+    this.group.add(core, barH, barV, barD, this.light);
     this.group.visible = false;
-    const core = new THREE.Mesh(unitBox, FLASH_MAT_HOT);
-    core.scale.set(0.5, 0.5, 0.9);
-    this.group.add(core);
-    const barH = new THREE.Mesh(unitBox, FLASH_MAT);
-    barH.scale.set(1.05, 0.16, 0.5);
-    this.group.add(barH);
-    const barV = new THREE.Mesh(unitBox, FLASH_MAT);
-    barV.scale.set(0.16, 1.05, 0.5);
-    this.group.add(barV);
-    this.mesh = core; // backwards-compatible handle
-    this.light = new THREE.PointLight(0xffc400, 0, 12, 1.6);
-    this.group.add(this.light);
     scene.add(this.group);
-    this.life = 0;
+    this.ttl = 0;
   }
-  // show at world pos, pointing along dir
-  fire(pos, dir) {
+  show(pos, dir) {
+    this.group.position.copy(pos);
+    this.group.lookAt(pos.clone().add(dir));
     this.group.visible = true;
-    this.group.position.copy(pos).addScaledVector(dir, 0.45);
-    this.group.lookAt(pos.clone().addScaledVector(dir, 2));
-    const s = 0.9 + Math.random() * 0.25;
-    this.group.scale.setScalar(s);
-    this.light.intensity = 80;
-    this.life = 0.09;
+    this.ttl = 0.12;
+    this.group.scale.setScalar(1 + Math.random() * 0.3);
   }
   update(dt) {
-    if (this.life > 0) {
-      this.life -= dt;
-      if (this.life <= 0) {
-        this.group.visible = false;
-        this.light.intensity = 0;
-      }
+    if (this.ttl > 0) {
+      this.ttl -= dt;
+      if (this.ttl <= 0) this.group.visible = false;
     }
   }
 }
 
-// --- bullet tracer: bright yellow beam from gun tip to target ------------
-// REBUILD FIX #5: a stretched emissive box (thin, long) laid exactly
-// along the shot line, so the bullet path is visible in the frozen
-// action2/action3 frames. One tracer per shot; the staged scenes keep
-// it visible by setting life = 999 after firing.
+// Bright yellow tracer beam from the muzzle to the hit point.
 export class Tracer {
   constructor(scene) {
-    this.mesh = new THREE.Mesh(unitBox, TRACER_MAT);
+    const mat = new THREE.MeshLambertMaterial({ color: 0xffe95a, emissive: 0xffd21a, emissiveIntensity: 3.5 });
+    this.mesh = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.14, 1), mat);
     this.mesh.visible = false;
-    this.mesh.castShadow = false;
     scene.add(this.mesh);
-    this.life = 0;
-    this.from = new THREE.Vector3();
-    this.to = new THREE.Vector3();
+    this.ttl = 0;
   }
   fire(from, to) {
-    this.from.copy(from);
-    this.to.copy(to);
     const dir = to.clone().sub(from);
     const len = dir.length();
-    this.mesh.visible = true;
     this.mesh.position.copy(from).addScaledVector(dir, 0.5);
     this.mesh.lookAt(to);
-    // box Z axis points at the target after lookAt
-    this.mesh.scale.set(0.09, 0.09, len);
-    this.life = 0.12;
+    this.mesh.scale.set(1, 1, len);
+    this.mesh.visible = true;
+    this.ttl = 0.14;
   }
   update(dt) {
-    if (this.life > 0) {
-      this.life -= dt;
-      if (this.life <= 0) this.mesh.visible = false;
+    if (this.ttl > 0) {
+      this.ttl -= dt;
+      if (this.ttl <= 0) this.mesh.visible = false;
     }
   }
 }
 
-// --- shooting: raycast from the shooter toward aim ------------------------
-const raycaster = new THREE.Raycaster();
-const _dir = new THREE.Vector3();
-export function shoot(from, target, hittables, range = 60) {
-  // from: Vector3 (gun tip), target: Vector3 (aim point)
-  _dir.copy(target).sub(from).normalize();
-  raycaster.set(from, _dir);
-  raycaster.far = range;
-  const hits = raycaster.intersectObjects(hittables, true);
+// Raycast shot against a list of target objects (enemies / cars).
+export function shoot(origin, dir, targets, range = 60) {
+  const ray = new THREE.Raycaster(origin, dir.clone().normalize(), 0.1, range);
+  const hits = ray.intersectObjects(targets, true);
   if (!hits.length) return null;
-  // walk up to the character / car root the part belongs to
-  let o = hits[0].object;
-  while (o.parent && !o.userData.kind) o = o.parent;
-  return { object: o, point: hits[0].point, distance: hits[0].distance };
+  let obj = hits[0].object;
+  while (obj && !obj.userData.kind) obj = obj.parent;
+  return { point: hits[0].point, target: obj, distance: hits[0].distance };
 }
