@@ -10,10 +10,9 @@ import { fileURLToPath } from 'node:url';
 const root = dirname(fileURLToPath(import.meta.url));
 const outDir = process.env.MAKEFUN_OUTPUT_DIR ?? '/output';
 
-rmSync(outDir, { recursive: true, force: true });
 mkdirSync(outDir, { recursive: true });
 cpSync(join(root, 'game'), join(outDir, 'game'), { recursive: true });
-cpSync(join(root, 'screenshots'), join(outDir, 'screenshots'), { recursive: true });
+if (existsSync(join(root, 'screenshots'))) cpSync(join(root, 'screenshots'), join(outDir, 'screenshots'), { recursive: true });
 
 const bytes = buildDossier(outDir, {
   text_max_bytes: 163840,
