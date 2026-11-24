@@ -8,8 +8,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = dirname(fileURLToPath(import.meta.url));
-const outDir = process.env.MAKEFUN_OUTPUT_DIR;
-if (!outDir) throw new Error('MAKEFUN_OUTPUT_DIR is not set');
+const outDir = process.env.MAKEFUN_OUTPUT_DIR ?? '/output';
 
 rmSync(outDir, { recursive: true, force: true });
 mkdirSync(outDir, { recursive: true });
