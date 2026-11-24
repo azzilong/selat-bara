@@ -1,309 +1,290 @@
-// hud.js — Selat Bara HUD: mission panel, Selat Bara PD response panel,
-// district + standing, weapon slots, money + clock, minimap (250x250) and
-// the full city map (640x480) with legend + standing list. DOM + 2D canvas.
+// hud.js — SELAT BARA. GTA-like HUD (fix #11, top-1 grammar only,
+// our own names/text): mission panel + stage/NEXT/progress (11c),
+// police response panel with live distances (11a), district +
+// standing above the minimap (11b), wanted status text (11d), weapon
+// slots (11e), money + clock top-right (11f), gold minimap border +
+// route + wanted circle (11g), speed + vehicle + damage (11h), hint
+// hidden in frozen scenes (11i). Full-screen map mode (fix #13/#13a).
 import { DISTRICTS, districtAt } from './city.js';
 
-const WORLD = { x0: -130, x1: 110, z0: -90, z1: 90 }; // big-map window
-const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const $ = (id) => document.getElementById(id);
 
 export class HUD {
   constructor() {
-    this.el = (id) => document.getElementById(id);
-    this.minimap = this.el('minimap');
+    this.minimap = $('minimap');
     this.mm = this.minimap.getContext('2d');
-    this.bigmap = this.el('bigmap');
-    this.bm = this.bigmap.getContext('2d');
-    this.mapMode = false; // false = minimap visible, true = big map overlay
-    this.player = { x: 0, z: 12 };
-    this.police = []; // {name, short, role, x, z}
-    this.enemies = [];
-    this.routeTarget = null; // {x, z, label}
-    this.wanted = 0;
-    this.district = DISTRICTS[0];
-    this.mission = null;
-    this.renderStandingList();
+    this.bigmap = $('bigmap');
+    this.bm = this.bigmap ? this.bigmap.getContext('2d') : null;
+    this.data = null;
+    this.units = [];
+    this.routeTarget = null;
+    this.heroPos = { x: 0, z: 0 };
+    this.mapMode = false;
+    this.frozen = false;
   }
-
-  // --- mission / wanted / district / weapons / money / speed ---
-  setMission(m) {
-    this.mission = m;
-    this.el('mission-name').textContent = m.name;
-    this.el('mission-objective').textContent = m.objective;
-    this.el('mission-stage').textContent = m.stage;
-    this.el('mission-next').textContent = m.next;
-    this.el('mission-progress').style.width = `${Math.round(m.progress * 100)}%`;
-  }
-  setWanted(n) {
-    this.wanted = n;
-    const stars = this.el('stars');
-    stars.innerHTML = '';
-    for (let i = 0; i < 5; i++) {
-      const s = document.createElement('span');
-      s.className = 'star' + (i < n ? ' on' : '');
-      s.textContent = '★';
-      stars.appendChild(s);
-    }
-    const status = n >= 3 ? 'AIR UNIT DEPLOYED' : n === 2 ? 'UNITS RESPONDING' : n === 1 ? 'PATROL ALERTED' : '';
-    const ws = this.el('wanted-status');
-    ws.textContent = status;
-    ws.style.display = status ? 'block' : 'none';
-    this.el('wanted-box').style.display = n > 0 ? 'block' : 'none';
-  }
-  setDistrict(d) {
-    this.district = d;
-    this.el('district-name').textContent = d.name;
-    this.el('district-street').textContent = d.street;
-    const pill = this.el('district-standing');
-    pill.textContent = `${d.standing} · ${d.standingVal}`;
-    pill.className = 'standing-pill ' + (d.standing === 'WARY' ? 'wary' : 'neutral');
-    this.el('standing-bar').style.width = `${d.standingVal}%`;
-  }
-  setHealth(h, a) {
-    this.el('health-bar').style.width = `${clamp(h, 0, 100)}%`;
-    this.el('health-num').textContent = Math.round(h);
-    this.el('armour-bar').style.width = `${clamp(a, 0, 100)}%`;
-    this.el('armour-num').textContent = Math.round(a);
-  }
-  setWeapon(slots, selected) {
-    const wrap = this.el('weapon-slots');
-    wrap.innerHTML = '';
+  setScene(d, { units = [], routeTarget = null, heroPos = null, mapMode = false, frozen = true } = {}) {
+    this.data = d;
+    this.units = units;
+    this.routeTarget = routeTarget;
+    if (heroPos) this.heroPos = { x: heroPos.x, z: heroPos.z };
+    this.mapMode = mapMode;
+    this.frozen = frozen;
+    $('mission-name').textContent = d.mission;
+    $('mission-objective').textContent = d.objective;
+    $('mission-stage').textContent = d.stage;
+    $('mission-next').textContent = d.next;
+    $('mission-progress').style.width = `${Math.round(d.progress * 100)}%`;
+    $('district-name').textContent = d.district;
+    $('district-street').textContent = d.street;
+    $('standing-pill').textContent = `${d.standing} · ${d.standingVal}`;
+    $('standing-pill').className = 'pill ' + d.standing.toLowerCase();
+    $('standing-bar').style.width = `${d.standingVal}%`;
+    $('clock').textContent = d.clock;
+    $('money').textContent = `$ ${d.money.toLocaleString('en-US')}`;
+    $('wanted-stars').textContent = '★'.repeat(d.wanted) + '☆'.repeat(5 - d.wanted);
+    $('wanted-text').textContent = d.wantedText;
+    $('wanted-box').style.display = d.wanted > 0 ? 'block' : 'none';
+    $('ammo-text').textContent = `${d.weapon} ${d.ammo}`;
+    const slots = document.querySelectorAll('#weapon-slots .slot');
+    const ammoMap = { 1: '∞', 2: d.slot === 2 ? d.ammo : '—', 3: d.slot === 3 ? d.ammo : '—' };
     slots.forEach((s, i) => {
-      const row = document.createElement('div');
-      row.className = 'slot' + (i === selected ? ' selected' : '') + (s.owned ? '' : ' locked');
-      row.innerHTML = `<span class="slot-num">${i + 1}</span> <span class="slot-name">${s.name}</span> <span class="slot-ammo">${s.owned ? (s.ammo ?? '∞') : '—'}</span>`;
-      wrap.appendChild(row);
+      const n = i + 1;
+      s.classList.toggle('selected', n === d.slot);
+      s.querySelector('.slot-ammo').textContent = ammoMap[n];
     });
-    const cur = slots[selected];
-    this.el('weapon-name').textContent = cur.name;
-    this.el('ammo').textContent = cur.owned ? (cur.ammo ?? '∞') : '—';
+    $('speed-value').textContent = d.speed > 0 ? `${d.speed} KM/H` : '';
+    $('speed-vehicle').textContent = d.vehicle;
+    $('speed-damage').textContent = d.damage > 0 ? `${d.damage}% DENTED` : '';
+    $('speed-box').style.display = d.speed > 0 ? 'block' : 'none';
+    $('hint-bar').style.display = frozen ? 'none' : 'block';
+    $('bigmap-wrap').style.display = mapMode ? 'flex' : 'none';
+    $('minimap-wrap').style.display = mapMode ? 'none' : 'block';
+    this.renderStandingList();
+    this.updatePdPanel();
   }
-  setMoney(n) { this.el('money').textContent = `$ ${n.toLocaleString('en-US')}`; }
-  setClock(t) { this.el('clock').textContent = t; }
-  setSpeed(kmh, vehicle, damage) {
-    const sp = this.el('speed-box');
-    if (kmh == null) { sp.style.display = 'none'; return; }
-    sp.style.display = 'block';
-    this.el('speed').textContent = `${Math.round(kmh)} KM/H`;
-    this.el('speed-vehicle').textContent = vehicle || '';
-    this.el('speed-damage').textContent = damage ? `${damage}% DENTED` : '';
-  }
-  showHint(show) { this.el('hint-bar').style.display = show ? 'block' : 'none'; }
-  showHUD(show) { this.el('hud').style.display = show ? 'block' : 'none'; }
-  showTitle(show) { this.el('title-overlay').style.display = show ? 'flex' : 'none'; }
-  showBusted(show) { this.el('busted-overlay').style.display = show ? 'flex' : 'none'; }
-
-  // --- Selat Bara PD response panel: named units + role + LIVE distance ---
-  setPD(units) {
-    this.police = units;
-    const rows = this.el('pd-rows');
+  updatePdPanel() {
+    const d = this.data;
+    if (!d) return;
+    const panel = $('pd-panel');
+    panel.style.display = d.wanted > 0 ? 'block' : 'none';
+    $('pd-title').textContent = `SELAT BARA PD RESPONSE — ${this.units.length} UNITS`;
+    const rows = $('pd-rows');
     rows.innerHTML = '';
-    this.el('pd-title').textContent = `SELAT BARA PD RESPONSE — ${units.length} UNITS`;
-    units.slice(0, 4).forEach((u) => {
-      const d = Math.round(Math.hypot(u.x - this.player.x, u.z - this.player.z));
+    const shown = this.units.slice(0, 3);
+    for (const u of shown) {
+      const dist = Math.round(Math.hypot(u.pos.x - this.heroPos.x, u.pos.z - this.heroPos.z));
       const row = document.createElement('div');
       row.className = 'pd-row';
-      row.innerHTML = `<span class="pd-name">${u.name}</span> <span class="pd-role ${u.role === 'RAMMING' ? 'hot' : ''}">${u.role}</span> <span class="pd-dist">${d} m</span>`;
+      row.innerHTML = `<span class="pd-name">${u.code} ${u.name}</span>` +
+        `<span class="pd-role ${u.role === 'RAMMING' ? 'hot' : ''}">· ${u.role}</span>` +
+        `<span class="pd-dist">${dist} m</span>`;
       rows.appendChild(row);
-    });
-    if (units.length > 4) {
+    }
+    if (this.units.length > 3) {
       const more = document.createElement('div');
       more.className = 'pd-row pd-more';
-      more.textContent = `+${units.length - 4} more units`;
+      more.textContent = `+${this.units.length - 3} more`;
       rows.appendChild(more);
     }
-    this.el('pd-status').textContent = this.wanted > 0
-      ? `CONTROL: ${this.wanted}★ — units responding`
-      : 'CONTROL: calm — no active pursuit';
+    $('pd-status').textContent = `CONTROL: ${'★'.repeat(d.wanted)} — units responding`;
   }
-
-  // --- standing list (big map panel), built from the DISTRICTS table ---
   renderStandingList() {
-    const list = this.el('standing-list');
+    const list = $('standing-list');
     if (!list) return;
     list.innerHTML = '';
-    for (const d of DISTRICTS) {
+    for (const dist of DISTRICTS) {
       const row = document.createElement('div');
-      row.className = 'stand-row';
-      const css = `#${d.color.toString(16).padStart(6, '0')}`;
-      row.innerHTML = `<span class="stand-dot" style="background:${css}"></span>` +
-        `<span class="stand-name">${d.name}</span>` +
-        `<span class="stand-val ${d.standing === 'WARY' ? 'wary' : ''}">${d.standing} · ${d.standingVal}</span>` +
-        `<span class="stand-bar"><span style="width:${d.standingVal}%"></span></span>`;
+      row.className = 'stand-row' + (this.data && dist.name === this.data.district ? ' current' : '');
+      row.innerHTML = `<span class="stand-name">${dist.name}</span>` +
+        `<span class="stand-val ${dist.standing.toLowerCase()}">${dist.standing} · ${dist.standingVal}</span>`;
       list.appendChild(row);
     }
   }
 
-  setMapMode(on) {
-    this.mapMode = on;
-    this.el('bigmap-wrap').style.display = on ? 'flex' : 'none';
-    this.el('minimap-wrap').style.display = on ? 'none' : 'block';
-  }
-
-  // --- minimap: 250x250, gold border, gold route (CLAMPED inside), wanted circle ---
+  // --- minimap: 250x250, sea + sand + districts + roads, gold border,
+  // gold route line (clamped inside the bounds), red wanted circle ---
   drawMinimap() {
-    const c = this.mm, S = 250;
-    const px = (x) => ((x - WORLD.x0) / (WORLD.x1 - WORLD.x0)) * S;
-    const pz = (z) => ((z - WORLD.z0) / (WORLD.z1 - WORLD.z0)) * S;
+    const c = this.mm;
+    const S = 250, W = 240; // world window x -130..110, z -105..105
+    const px = (x) => ((x + 130) / W) * S;
+    const pz = (z) => ((z + 105) / 210) * S;
+    const clamp = (v) => Math.max(2, Math.min(S - 2, v));
     c.clearRect(0, 0, S, S);
-    // sea + sand
-    c.fillStyle = '#2fa8d8'; c.fillRect(0, 0, px(-96), S);
-    c.fillStyle = '#e8d8a8'; c.fillRect(px(-96), 0, px(-88) - px(-96), S);
-    // district blocks
-    for (const d of DISTRICTS) {
-      c.fillStyle = `#${d.color.toString(16).padStart(6, '0')}`;
-      c.globalAlpha = 0.55;
-      c.fillRect(px(d.rect.x0), pz(d.rect.z0), px(d.rect.x1) - px(d.rect.x0), pz(d.rect.z1) - pz(d.rect.z0));
+    c.fillStyle = '#20242a'; // dark base so district colours read true
+    c.fillRect(0, 0, S, S);
+    c.fillStyle = '#1e90d6'; // sea
+    c.fillRect(0, 0, px(-96), S);
+    c.fillStyle = '#f5e0a0'; // beach
+    c.fillRect(px(-96), 0, px(-84) - px(-96), S);
+    for (const d of DISTRICTS) { // district blocks
+      c.fillStyle = '#' + d.color.toString(16).padStart(6, '0');
+      c.globalAlpha = 0.35;
+      c.fillRect(px(d.rect[0]), pz(d.rect[2]), px(d.rect[1]) - px(d.rect[0]), pz(d.rect[3]) - pz(d.rect[2]));
+      c.globalAlpha = 1;
     }
-    c.globalAlpha = 1;
-    // roads
-    c.strokeStyle = '#33363d'; c.lineWidth = 5;
-    for (const p of [-63, -42, -21, 0, 21, 42, 63]) {
-      c.beginPath(); c.moveTo(px(p), 0); c.lineTo(px(p), S); c.stroke();
-      c.beginPath(); c.moveTo(0, pz(p)); c.lineTo(S, pz(p)); c.stroke();
+    c.fillStyle = '#3d3d3d'; // roads
+    for (const v of [-84, -63, -42, -21, 0, 21, 42, 63, 84]) {
+      const w = v === 0 ? 12 : 8;
+      c.fillRect(px(-96), pz(v - w / 2), px(105) - px(-96), (w / 210) * S);
+      c.fillRect(px(v - w / 2), 0, (w / W) * S, S);
     }
-    // gold mission route, clamped inside the canvas
+    // gold route player -> docks, clamped inside the bounds
     if (this.routeTarget) {
-      const ax = clamp(px(this.player.x), 4, S - 4), ay = clamp(pz(this.player.z), 4, S - 4);
-      const bx = clamp(px(this.routeTarget.x), 4, S - 4), by = clamp(pz(this.routeTarget.z), 4, S - 4);
-      c.strokeStyle = '#ffc23a'; c.lineWidth = 2.5;
-      c.beginPath(); c.moveTo(ax, ay); c.lineTo(bx, by); c.stroke();
-      c.fillStyle = '#ffc23a';
-      c.beginPath(); c.arc(bx, by, 4, 0, Math.PI * 2); c.fill();
+      c.strokeStyle = '#ffd34d';
+      c.lineWidth = 3;
+      c.beginPath();
+      c.moveTo(clamp(px(this.heroPos.x)), clamp(pz(this.heroPos.z)));
+      c.lineTo(clamp(px(this.routeTarget.x)), clamp(pz(this.routeTarget.z)));
+      c.stroke();
+      c.fillStyle = '#ffd34d';
+      c.beginPath();
+      c.arc(clamp(px(this.routeTarget.x)), clamp(pz(this.routeTarget.z)), 5, 0, Math.PI * 2);
+      c.fill();
     }
-    // wanted radius circle around the player (clamped centre)
-    if (this.wanted >= 1) {
-      c.strokeStyle = 'rgba(255,42,42,0.85)'; c.lineWidth = 2;
-      c.beginPath(); c.arc(clamp(px(this.player.x), 14, S - 14), clamp(pz(this.player.z), 14, S - 14), 13, 0, Math.PI * 2); c.stroke();
+    // red wanted circle around the player when wanted >= 1
+    if (this.data && this.data.wanted >= 1) {
+      c.strokeStyle = '#ff2a22';
+      c.lineWidth = 2;
+      c.beginPath();
+      c.arc(clamp(px(this.heroPos.x)), clamp(pz(this.heroPos.z)), 18, 0, Math.PI * 2);
+      c.stroke();
     }
-    // police dots (clamped)
-    for (const u of this.police) {
-      c.fillStyle = '#ff2a2a';
-      c.beginPath(); c.arc(clamp(px(u.x), 4, S - 4), clamp(pz(u.z), 4, S - 4), 3.5, 0, Math.PI * 2); c.fill();
+    // police dots (clamped) + player arrow
+    for (const u of this.units) {
+      c.fillStyle = '#ff2a22';
+      c.beginPath();
+      c.arc(clamp(px(u.pos.x)), clamp(pz(u.pos.z)), 4, 0, Math.PI * 2);
+      c.fill();
     }
-    for (const e of this.enemies) {
-      c.fillStyle = '#ff7a1a';
-      c.beginPath(); c.arc(clamp(px(e.x), 4, S - 4), clamp(pz(e.z), 4, S - 4), 3, 0, Math.PI * 2); c.fill();
-    }
-    // player arrow (clamped)
-    const ax = clamp(px(this.player.x), 8, S - 8), ay = clamp(pz(this.player.z), 8, S - 8);
+    c.save();
+    c.translate(clamp(px(this.heroPos.x)), clamp(pz(this.heroPos.z)));
     c.fillStyle = '#ffffff';
-    c.beginPath(); c.moveTo(ax, ay - 7); c.lineTo(ax + 5, ay + 5); c.lineTo(ax - 5, ay + 5); c.closePath(); c.fill();
-    c.strokeStyle = '#111'; c.lineWidth = 1; c.stroke();
-    // north marker
-    c.fillStyle = '#ffffff'; c.font = 'bold 13px sans-serif'; c.textAlign = 'right';
-    c.fillText('N', S - 8, S - 8);
+    c.beginPath();
+    c.moveTo(0, -8); c.lineTo(6, 6); c.lineTo(-6, 6); c.closePath();
+    c.fill();
+    c.restore();
   }
 
-  // --- big map: 640x480, districts + gold dashed boundaries + labels + POIs ---
+  // --- big map (fix #13/#13a): 640x480, gold dashed district
+  // boundaries, POI labels, route + distance, legend, standing list ---
   drawBigMap() {
-    const c = this.bm, W = 640, H = 480;
-    const px = (x) => ((x - WORLD.x0) / (WORLD.x1 - WORLD.x0)) * W;
-    const pz = (z) => ((z - WORLD.z0) / (WORLD.z1 - WORLD.z0)) * H;
+    if (!this.bm) return;
+    const c = this.bm;
+    const W = 640, H = 480;
+    const x0 = -130, x1 = 110, z0 = -90, z1 = 90;
+    const px = (x) => ((x - x0) / (x1 - x0)) * W;
+    const pz = (z) => ((z - z0) / (z1 - z0)) * H;
     c.clearRect(0, 0, W, H);
-    // sea + sand
-    c.fillStyle = '#2fa8d8'; c.fillRect(0, 0, px(-96), H);
-    c.fillStyle = '#e8d8a8'; c.fillRect(px(-96), 0, px(-88) - px(-96), H);
-    // district blocks in identity colours
+    c.fillStyle = '#1e90d6';
+    c.fillRect(0, 0, px(-96), H);
+    c.fillStyle = '#f5e0a0';
+    c.fillRect(px(-96), 0, px(-84) - px(-96), H);
     for (const d of DISTRICTS) {
-      c.fillStyle = `#${d.color.toString(16).padStart(6, '0')}`;
-      c.globalAlpha = 0.5;
-      c.fillRect(px(d.rect.x0), pz(d.rect.z0), px(d.rect.x1) - px(d.rect.x0), pz(d.rect.z1) - pz(d.rect.z0));
+      c.fillStyle = '#' + d.color.toString(16).padStart(6, '0');
+      c.globalAlpha = 0.4;
+      c.fillRect(px(d.rect[0]), pz(d.rect[2]), px(d.rect[1]) - px(d.rect[0]), pz(d.rect[3]) - pz(d.rect[2]));
+      c.globalAlpha = 1;
+      c.strokeStyle = '#ffd34d';
+      c.lineWidth = 2;
+      c.setLineDash([8, 5]);
+      c.strokeRect(px(d.rect[0]), pz(d.rect[2]), px(d.rect[1]) - px(d.rect[0]), pz(d.rect[3]) - pz(d.rect[2]));
+      c.setLineDash([]);
     }
-    c.globalAlpha = 1;
-    // gold dashed district boundaries
-    c.strokeStyle = '#ffc23a'; c.lineWidth = 2; c.setLineDash([7, 5]);
+    c.fillStyle = '#3d3d3d';
+    for (const v of [-84, -63, -42, -21, 0, 21, 42, 63, 84]) {
+      const w = v === 0 ? 12 : 8;
+      c.fillRect(px(-96), pz(v - w / 2), px(105) - px(-96), ((w / 180) * H));
+      c.fillRect(px(v - w / 2), 0, ((w / 240) * W), H);
+      c.fillStyle = '#ffd34d';
+      c.fillRect(px(-96), pz(v) - 1, px(105) - px(-96), 2);
+      c.fillStyle = '#3d3d3d';
+    }
+    // District labels LAST (after the roads), so no road strip ever
+    // paints over the text (round-11 render bug: "KOTA TUA" read as
+    // "TA T" — the first fix only moved labels past the district
+    // fills, not past the roads).
     for (const d of DISTRICTS) {
-      c.strokeRect(px(d.rect.x0) + 1, pz(d.rect.z0) + 1, px(d.rect.x1) - px(d.rect.x0) - 2, pz(d.rect.z1) - pz(d.rect.z0) - 2);
-    }
-    c.setLineDash([]);
-    // roads at true width with yellow centre lines
-    for (const p of [-63, -42, -21, 0, 21, 42, 63]) {
-      const wv = (p === 0 ? 12 : 8) / (WORLD.x1 - WORLD.x0) * W;
-      c.fillStyle = '#33363d';
-      c.fillRect(px(p) - wv / 2, 0, wv, H);
-      c.fillRect(0, pz(p) - wv / 2, W, wv);
-      c.strokeStyle = '#d9b400'; c.lineWidth = 1.5;
-      c.beginPath(); c.moveTo(px(p), 0); c.lineTo(px(p), H); c.stroke();
-      c.beginPath(); c.moveTo(0, pz(p)); c.lineTo(W, pz(p)); c.stroke();
-    }
-    // district labels anchored mid-block (clear of roads)
-    c.textAlign = 'center';
-    for (const d of DISTRICTS) {
-      const current = d.key === this.district.key;
-      c.font = `bold ${current ? 17 : 15}px sans-serif`;
-      c.fillStyle = current ? '#ffc23a' : '#ffffff';
-      c.strokeStyle = 'rgba(0,0,0,0.65)'; c.lineWidth = 3;
-      c.strokeText(d.name, px(d.label.x), pz(d.label.z));
-      c.fillText(d.name, px(d.label.x), pz(d.label.z));
+      c.fillStyle = (this.data && d.name === this.data.district) ? '#ffd34d' : '#ffffff';
+      c.font = 'bold 15px sans-serif';
+      c.textAlign = 'center';
+      c.fillText(d.name, px(d.label[0]), pz(d.label[1]));
+      c.font = '11px sans-serif';
+      c.fillStyle = '#ffffff';
+      c.fillText(d.street, px(d.label[0]), pz(d.label[1]) + 16);
     }
     // POI labels (Selat Bara's own names)
-    c.font = 'bold 13px sans-serif'; c.fillStyle = '#ffe14d';
-    c.strokeStyle = 'rgba(0,0,0,0.65)'; c.lineWidth = 3;
-    const dockX = px(-86), dockZ = pz(40);
+    c.font = 'bold 13px sans-serif';
+    c.fillStyle = '#ffd34d';
     c.textAlign = 'left';
-    c.strokeText('◆ DERMAGA BARA', dockX + 6, dockZ);
-    c.fillText('◆ DERMAGA BARA', dockX + 6, dockZ);
-    // vertical beach label
+    c.fillText('◆ DERMAGA BARA', px(-88) + 6, pz(40));
     c.save();
     c.translate(px(-92), pz(0));
     c.rotate(-Math.PI / 2);
-    c.font = 'bold 14px sans-serif'; c.fillStyle = '#ffffff';
-    c.textAlign = 'center';
-    c.strokeText('PANTAI BARA', 0, 0);
+    c.fillStyle = '#ffffff';
+    c.font = 'bold 12px sans-serif';
     c.fillText('PANTAI BARA', 0, 0);
     c.restore();
-    // gold route player -> docks + distance label
+    c.fillStyle = '#ffffff';
+    c.fillText('◆ SBPD OFFICE', px(63) + 6, pz(-42));
+    // gold GPS route + distance label (same 3D math as the PD panel)
     if (this.routeTarget) {
-      const ax = px(this.player.x), ay = pz(this.player.z);
-      const bx = px(this.routeTarget.x), by = pz(this.routeTarget.z);
-      c.strokeStyle = '#ffc23a'; c.lineWidth = 3;
-      c.beginPath(); c.moveTo(ax, ay); c.lineTo(bx, by); c.stroke();
-      c.fillStyle = '#ffc23a';
-      c.beginPath(); c.arc(bx, by, 6, 0, Math.PI * 2); c.fill();
-      const dist = Math.round(Math.hypot(this.routeTarget.x - this.player.x, this.routeTarget.z - this.player.z));
-      const mx = (ax + bx) / 2, my = (ay + by) / 2 - 10;
-      c.font = 'bold 14px sans-serif';
-      c.strokeStyle = 'rgba(0,0,0,0.7)'; c.lineWidth = 3;
-      c.strokeText(`${dist} m`, mx, my);
-      c.fillStyle = '#ffe14d';
-      c.fillText(`${dist} m`, mx, my);
+      const dist = Math.round(Math.hypot(this.routeTarget.x - this.heroPos.x, this.routeTarget.z - this.heroPos.z));
+      c.strokeStyle = '#ffd34d';
+      c.lineWidth = 3;
+      c.setLineDash([10, 6]);
+      c.beginPath();
+      c.moveTo(px(this.heroPos.x), pz(this.heroPos.z));
+      c.lineTo(px(this.routeTarget.x), pz(this.routeTarget.z));
+      c.stroke();
+      c.setLineDash([]);
+      c.fillStyle = '#ffd34d';
+      c.font = 'bold 13px sans-serif';
+      c.fillText(`${dist} m`, (px(this.heroPos.x) + px(this.routeTarget.x)) / 2 + 8, (pz(this.heroPos.z) + pz(this.routeTarget.z)) / 2 - 8);
+      c.beginPath();
+      c.arc(px(this.routeTarget.x), pz(this.routeTarget.z), 7, 0, Math.PI * 2);
+      c.fill();
     }
-    // wanted radius circle
-    if (this.wanted >= 1) {
-      c.strokeStyle = 'rgba(255,42,42,0.9)'; c.lineWidth = 2.5;
-      c.beginPath(); c.arc(px(this.player.x), pz(this.player.z), 26, 0, Math.PI * 2); c.stroke();
+    // wanted circle + police dots + player arrow
+    if (this.data && this.data.wanted >= 1) {
+      c.strokeStyle = '#ff2a22';
+      c.lineWidth = 2;
+      c.beginPath();
+      c.arc(px(this.heroPos.x), pz(this.heroPos.z), 26, 0, Math.PI * 2);
+      c.stroke();
     }
-    // police dots + short labels
     c.font = 'bold 11px sans-serif';
-    for (const u of this.police) {
-      c.fillStyle = '#ff2a2a';
-      c.beginPath(); c.arc(px(u.x), pz(u.z), 5, 0, Math.PI * 2); c.fill();
-      c.strokeStyle = '#ffffff'; c.lineWidth = 1.5; c.stroke();
+    for (const u of this.units) {
+      c.fillStyle = '#ff2a22';
+      c.beginPath();
+      c.arc(px(u.pos.x), pz(u.pos.z), 6, 0, Math.PI * 2);
+      c.fill();
       c.fillStyle = '#ffffff';
-      c.textAlign = 'left';
-      c.strokeStyle = 'rgba(0,0,0,0.7)'; c.lineWidth = 3;
-      c.strokeText(u.short, px(u.x) + 8, pz(u.z) + 4);
-      c.fillText(u.short, px(u.x) + 8, pz(u.z) + 4);
+      c.fillText(u.code, px(u.pos.x) + 9, pz(u.pos.z) + 4);
     }
-    // player arrow + name
-    const ax = px(this.player.x), ay = pz(this.player.z);
+    c.save();
+    c.translate(px(this.heroPos.x), pz(this.heroPos.z));
     c.fillStyle = '#ffffff';
-    c.beginPath(); c.moveTo(ax, ay - 10); c.lineTo(ax + 8, ay + 8); c.lineTo(ax - 8, ay + 8); c.closePath(); c.fill();
-    c.strokeStyle = '#111'; c.lineWidth = 1.5; c.stroke();
-    c.font = 'bold 13px sans-serif'; c.textAlign = 'left';
-    c.strokeStyle = 'rgba(0,0,0,0.7)'; c.lineWidth = 3;
-    c.strokeText('RAKA', ax + 10, ay + 5);
+    c.beginPath();
+    c.moveTo(0, -11); c.lineTo(9, 8); c.lineTo(-9, 8); c.closePath();
+    c.fill();
+    c.restore();
     c.fillStyle = '#ffffff';
-    c.fillText('RAKA', ax + 10, ay + 5);
+    c.font = 'bold 12px sans-serif';
+    c.fillText('RAKA', px(this.heroPos.x) + 12, pz(this.heroPos.z) + 4);
     // compass
-    c.font = 'bold 15px sans-serif'; c.textAlign = 'right';
     c.fillStyle = '#ffffff';
-    c.fillText('N ↑', W - 10, 20);
+    c.font = 'bold 14px sans-serif';
+    c.fillText('N ↑', W - 34, 22);
   }
 
   tick() {
+    this.updatePdPanel();
     if (this.mapMode) this.drawBigMap();
     else this.drawMinimap();
-    if (this.police.length) this.setPD(this.police);
+  }
+  setMapMode(on) {
+    this.mapMode = on;
+    $('bigmap-wrap').style.display = on ? 'flex' : 'none';
+    $('minimap-wrap').style.display = on ? 'none' : 'block';
   }
 }

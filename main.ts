@@ -1,36 +1,34 @@
-// main.ts — Selat Bara dossier build for make.fun (gta6-01).
-// Copies game/ + screenshots/ into $MAKEFUN_OUTPUT_DIR, builds the dossier
-// with the kit's buildDossier, writes dossier.json, and reports the text
-// size against the 163,840-byte HARD limit. Run: MAKEFUN_OUTPUT_DIR=out node main.ts
-import { writeFileSync, rmSync, cpSync, mkdirSync } from 'node:fs';
-import { join, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
+// main.ts — SELAT BARA build program (gta6-01).
+// Copies game/ + screenshots/ into $MAKEFUN_OUTPUT_DIR, writes
+// dossier.json via buildDossier, and reports the dossier text size
+// against the HARD 163,840-byte limit.
 import { buildDossier } from './vendor/makefun-game.ts';
+import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const root = dirname(fileURLToPath(import.meta.url));
-const out = process.env.MAKEFUN_OUTPUT_DIR || join(root, 'out');
+const outDir = process.env.MAKEFUN_OUTPUT_DIR;
+if (!outDir) throw new Error('MAKEFUN_OUTPUT_DIR is not set');
 
-// Fresh output every run: stale files (e.g. a retired screenshot) must never
-// be counted, so the whole output dir is removed before copying.
-rmSync(out, { recursive: true, force: true });
-mkdirSync(out, { recursive: true });
-cpSync(join(root, 'game'), join(out, 'game'), { recursive: true });
-cpSync(join(root, 'screenshots'), join(out, 'screenshots'), { recursive: true });
+rmSync(outDir, { recursive: true, force: true });
+mkdirSync(outDir, { recursive: true });
+cpSync(join(root, 'game'), join(outDir, 'game'), { recursive: true });
+cpSync(join(root, 'screenshots'), join(outDir, 'screenshots'), { recursive: true });
 
-const bytes = buildDossier(out, {
+const bytes = buildDossier(outDir, {
   text_max_bytes: 163840,
   screenshots: { max: 4, max_bytes: 262144 },
 });
-writeFileSync(join(out, 'dossier.json'), bytes);
+writeFileSync(join(outDir, 'dossier.json'), bytes);
 
 const parsed = JSON.parse(Buffer.from(bytes).toString('utf8'));
-const text = typeof parsed.text === 'string' ? parsed.text : '';
-const textBytes = Buffer.byteLength(text, 'utf8');
-const cut = text.includes('[Cut at');
-const images = Array.isArray(parsed.images) ? parsed.images.length : 0;
-console.log(`dossier text ${textBytes} / 163840 bytes — ${textBytes <= 163840 && !cut ? 'FITS' : 'OVER LIMIT'}${cut ? ' (TRUNCATED)' : ''}`);
-console.log(`screenshots: ${images}, dossier.json: ${bytes.length} bytes`);
-if (cut || textBytes > 163840) {
-  console.error('dossier text exceeds the limit or was cut — shrink the sources');
-  process.exitCode = 1;
+const textBytes = Buffer.byteLength(parsed.text, 'utf8');
+const shots = Array.isArray(parsed.images) ? parsed.images.length : 0;
+console.log(`dossier text ${textBytes} / 163840 bytes — ${textBytes <= 163840 ? 'FITS' : 'OVER LIMIT'}`);
+console.log(`screenshots: ${shots}`);
+if (typeof parsed.text === 'string' && parsed.text.includes('[Cut at')) {
+  throw new Error('dossier text was truncated by buildDossier — sources were cut');
 }
+if (textBytes > 163840) throw new Error('dossier text exceeds the 163,840-byte limit');
+console.log(`dossier.json ${bytes.length} bytes, exit 0`);

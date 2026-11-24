@@ -1,176 +1,166 @@
-// vehicleBuilder.js — Selat Bara vehicles: body + cabin + 4 wheels + glass +
-// lights, solid colours. Police light bars are BIG and BRIGHT (fix #2).
-// Helicopter: spinning rotor + SpotLight beam down. Lambert, no textures.
+// vehicleBuilder.js — SELAT BARA. Cars + helicopter, all procedural
+// Box/Capsule geometry, solid Lambert colours, no textures.
+// Cars: body + cabin + 4 wheels + glass + lights. Police cars carry a
+// BIG bright roof light bar (fix #2) that reads in full midday sun.
 import * as THREE from 'three';
 
-function lam(color, emissive = 0x000000, ei = 1) {
+export function lam(color, emissive = 0x000000, ei = 1) {
   return new THREE.MeshLambertMaterial({ color, emissive, emissiveIntensity: ei });
 }
-function part(w, h, d, mat, x, y, z) {
+function box(w, h, d, mat, x = 0, y = 0, z = 0) {
   const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
   m.position.set(x, y, z);
   m.castShadow = true;
   return m;
 }
 
-// Cars face +Z by default (front at +Z). Length 4.2, width 1.8, height ~1.4,
-// wheel radius 0.35. kinds: 'sports' | 'sedan' | 'police' | 'van'.
-export function buildCar(opts = {}) {
-  const { kind = 'sedan', color = 0x3a6fd8 } = opts;
+export function buildWheel() {
   const g = new THREE.Group();
-  const bodyMat = lam(color);
-  const glassMat = lam(0x1a2530);
-  const isPolice = kind === 'police';
-  const isSports = kind === 'sports';
-  const isVan = kind === 'van';
+  const tyre = new THREE.Mesh(new THREE.CylinderGeometry(0.36, 0.36, 0.26, 12), lam(0x1a1a1a));
+  tyre.rotation.z = Math.PI / 2;
+  tyre.castShadow = true;
+  const hub = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.18, 0.28, 10), lam(0xc8c8c8));
+  hub.rotation.z = Math.PI / 2;
+  g.add(tyre, hub);
+  return g;
+}
 
-  const bodyLen = isVan ? 4.6 : 4.2;
-  const bodyH = isSports ? 0.48 : 0.58;
-  const bodyY = isVan ? 0.72 : 0.58;
-  // body + cabin
-  g.add(part(1.8, bodyH, bodyLen, isPolice ? lam(0xf0f0f0) : bodyMat, 0, bodyY, 0));
-  if (isVan) {
-    g.add(part(1.7, 0.85, 3.6, isPolice ? lam(0xf0f0f0) : bodyMat, 0, 1.35, -0.2));
-    g.add(part(1.5, 0.5, 0.9, glassMat, 0, 1.35, 1.7));
-  } else {
-    g.add(part(1.5, 0.5, isSports ? 1.7 : 2.1, isPolice ? lam(0xe8e8e8) : bodyMat, 0, bodyY + bodyH / 2 + 0.22, -0.25));
-    // windshields: front + rear glass
-    g.add(part(1.45, 0.42, 0.08, glassMat, 0, bodyY + bodyH / 2 + 0.22, isSports ? 0.62 : 0.82));
-    g.add(part(1.45, 0.42, 0.08, glassMat, 0, bodyY + bodyH / 2 + 0.22, -1.32));
-    // side glass
-    g.add(part(0.06, 0.36, 1.6, glassMat, 0.76, bodyY + bodyH / 2 + 0.22, -0.25));
-    g.add(part(0.06, 0.36, 1.6, glassMat, -0.76, bodyY + bodyH / 2 + 0.22, -0.25));
+// Generic car: length along Z, front faces -Z.
+export function buildCar({ body = 0xd43d2a, cabin = 0x20242a, glass = 0x9fd8e8, sport = false } = {}) {
+  const car = new THREE.Group();
+  const bodyMat = lam(body);
+  const lower = box(2.0, 0.62, 4.3, bodyMat, 0, 0.55, 0);
+  const nose = box(1.9, 0.42, 0.7, bodyMat, 0, 0.5, -2.15);
+  const cab = box(1.7, 0.58, 2.1, lam(cabin), 0, 1.12, 0.25);
+  const windshield = box(1.66, 0.5, 0.06, lam(glass), 0, 1.1, -0.82);
+  windshield.rotation.x = 0.28;
+  const rearGlass = box(1.66, 0.46, 0.06, lam(glass), 0, 1.1, 1.32);
+  rearGlass.rotation.x = -0.28;
+  const roof = box(1.72, 0.08, 2.0, bodyMat, 0, 1.44, 0.25);
+  car.add(lower, nose, cab, windshield, rearGlass, roof);
+  car.add(box(0.34, 0.16, 0.06, lam(0xfff6c0, 0xfff2a0, 1.6), -0.68, 0.62, -2.52));
+  car.add(box(0.34, 0.16, 0.06, lam(0xfff6c0, 0xfff2a0, 1.6), 0.68, 0.62, -2.52));
+  car.add(box(0.3, 0.14, 0.06, lam(0xff2a22, 0xff2a22, 1.2), -0.68, 0.66, 2.18));
+  car.add(box(0.3, 0.14, 0.06, lam(0xff2a22, 0xff2a22, 1.2), 0.68, 0.66, 2.18));
+  car.add(box(2.02, 0.18, 0.12, lam(0x222222), 0, 0.32, -2.2));
+  car.add(box(2.02, 0.18, 0.12, lam(0x222222), 0, 0.32, 2.2));
+  if (sport) {
+    car.add(box(1.9, 0.1, 0.5, lam(0x1c1c1c), 0, 1.02, 2.05)); // rear spoiler
+    car.add(box(0.08, 0.22, 0.4, lam(0x1c1c1c), -0.8, 0.9, 2.0));
+    car.add(box(0.08, 0.22, 0.4, lam(0x1c1c1c), 0.8, 0.9, 2.0));
   }
-  // bumpers
-  g.add(part(1.82, 0.16, 0.22, lam(0x2c313a), 0, 0.32, bodyLen / 2 + 0.02));
-  g.add(part(1.82, 0.16, 0.22, lam(0x2c313a), 0, 0.32, -bodyLen / 2 - 0.02));
-  // headlights (white, emissive) + taillights (red, emissive)
-  const headMat = lam(0xfff6c8, 0xfff2a0, 1.6);
-  const tailMat = lam(0xff2a2a, 0xff2a2a, 1.6);
-  for (const s of [-1, 1]) {
-    g.add(part(0.34, 0.14, 0.06, headMat, s * 0.6, 0.62, bodyLen / 2 + 0.03));
-    g.add(part(0.34, 0.14, 0.06, tailMat, s * 0.6, 0.62, -bodyLen / 2 - 0.03));
-  }
-  // police: blue side stripe + door shield dot
-  if (isPolice) {
-    for (const s of [-1, 1]) {
-      g.add(part(0.04, 0.3, 3.4, lam(0x2456c8), s * 0.92, 0.62, 0));
-    }
-    g.add(part(0.04, 0.4, 0.7, lam(0x2456c8), 0.92, 0.95, -0.2));
-    g.add(part(0.04, 0.4, 0.7, lam(0x2456c8), -0.92, 0.95, -0.2));
-    // BIG roof light bar: black base 1.5 wide, red + blue blocks 0.7 x 0.34,
-    // dedicated emissive materials, flashing alternately.
-    const barBase = part(1.5, 0.1, 0.5, lam(0x14161a), 0, 1.42, -0.25);
-    g.add(barBase);
-    const redMat = new THREE.MeshLambertMaterial({ color: 0xff2020, emissive: 0xff2020, emissiveIntensity: 2.6 });
-    const blueMat = new THREE.MeshLambertMaterial({ color: 0x2040ff, emissive: 0x2040ff, emissiveIntensity: 2.6 });
-    const redBlock = part(0.7, 0.34, 0.46, redMat, -0.38, 1.62, -0.25);
-    const blueBlock = part(0.7, 0.34, 0.46, blueMat, 0.38, 1.62, -0.25);
-    g.add(redBlock, blueBlock);
-    g.userData.lightRed = redMat;
-    g.userData.lightBlue = blueMat;
-    g.userData.flashPhase = 0;
-  }
-  // wheels: 4 cylinders, radius 0.35
-  const wheelGeo = new THREE.CylinderGeometry(0.35, 0.35, 0.26, 12);
-  const wheelMat = lam(0x16181c);
-  const hubMat = lam(0x9aa2ab);
   const wheels = [];
-  for (const [wx, wz] of [[-0.82, 1.35], [0.82, 1.35], [-0.82, -1.35], [0.82, -1.35]]) {
-    const wheel = new THREE.Group();
-    const tire = new THREE.Mesh(wheelGeo, wheelMat);
-    tire.rotation.z = Math.PI / 2; tire.castShadow = true;
-    const hub = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.16, 0.28, 8), hubMat);
-    hub.rotation.z = Math.PI / 2;
-    wheel.add(tire, hub);
-    wheel.position.set(wx, 0.35, wz);
-    g.add(wheel);
-    wheels.push(wheel);
+  for (const [wx, wz] of [[-0.95, -1.45], [0.95, -1.45], [-0.95, 1.45], [0.95, 1.45]]) {
+    const w = buildWheel();
+    w.position.set(wx, 0.36, wz);
+    car.add(w);
+    wheels.push(w);
   }
-  g.userData.wheels = wheels;
-  g.userData.kind = kind;
-  return g;
+  car.userData.wheels = wheels;
+  car.userData.kind = 'car';
+  return car;
 }
 
-// Flash the police light bar: red and blue alternate, bright in midday sun.
+export function buildSportsCar() {
+  return buildCar({ body: 0xd43d2a, sport: true });
+}
+export function buildSedan() {
+  return buildCar({ body: 0x2e86c1 });
+}
+export function buildVan() {
+  const v = buildCar({ body: 0xe8a13a, cabin: 0x333333 });
+  v.scale.set(1.05, 1.15, 1.1);
+  return v;
+}
+
+// Police car: white body, blue doors, "SELAT BARA PD" door band, and a
+// BIG roof light bar — 1.5u black base, red + blue blocks 0.7w x 0.34h,
+// emissive 2.6 flashing to 3.5 (fix #2: unmistakable in midday sun).
+export function buildPoliceCar() {
+  const car = buildCar({ body: 0xf2f2f2 });
+  car.add(box(2.02, 0.3, 1.6, lam(0x1d4ed8), 0, 0.62, 0.3)); // blue door band
+  car.add(box(0.02, 0.2, 1.1, lam(0x111111), -1.01, 0.85, 0.3)); // door stripe L
+  car.add(box(0.02, 0.2, 1.1, lam(0x111111), 1.01, 0.85, 0.3)); // door stripe R
+  const base = box(1.5, 0.1, 0.55, lam(0x111111), 0, 1.53, 0.25);
+  car.add(base);
+  const redMat = lam(0xff2020, 0xff1010, 2.6);
+  const blueMat = lam(0x2040ff, 0x1020ff, 2.6);
+  const red = box(0.7, 0.34, 0.5, redMat, -0.38, 1.74, 0.25);
+  const blue = box(0.7, 0.34, 0.5, blueMat, 0.38, 1.74, 0.25);
+  car.add(red, blue);
+  car.userData.lightBar = { red, blue, redMat, blueMat, phase: 0 };
+  car.userData.kind = 'police';
+  return car;
+}
+
+// Flash the roof bar: alternate red/blue, bright in daylight.
 export function flashLightBar(car, dt) {
-  if (!car.userData.lightRed) return;
-  car.userData.flashPhase = (car.userData.flashPhase + dt * 6) % 2;
-  const on = car.userData.flashPhase < 1;
-  car.userData.lightRed.emissiveIntensity = on ? 3.5 : 0.35;
-  car.userData.lightBlue.emissiveIntensity = on ? 0.35 : 3.5;
+  const lb = car.userData.lightBar;
+  if (!lb) return;
+  lb.phase += dt * 6;
+  const on = Math.sin(lb.phase) > 0;
+  lb.redMat.emissiveIntensity = on ? 3.5 : 0.7;
+  lb.blueMat.emissiveIntensity = on ? 0.7 : 3.5;
 }
 
-export function spinWheels(car, speed, dt) {
-  if (!car.userData.wheels) return;
-  const spin = (speed * dt) / 0.35;
-  for (const w of car.userData.wheels) w.rotation.x += spin;
+export function animateWheels(car, dt, speed) {
+  const wheels = car.userData.wheels;
+  if (!wheels) return;
+  for (const w of wheels) w.rotation.x += dt * speed * 0.9;
 }
 
-// Wrecked car: grey, tilted, one wheel missing, smoke point on the hood.
-export function buildWreck() {
-  const g = buildCar({ kind: 'sedan', color: 0x5a6068 });
-  g.rotation.z = 0.06;
-  g.rotation.y = 0.35;
-  g.position.y = 0.08;
-  const hood = new THREE.Object3D();
-  hood.position.set(0.2, 0.95, 1.6);
-  g.add(hood);
-  g.userData.smokePoint = hood;
-  // cracked windshield: pale spider-web box
-  const crack = part(1.4, 0.4, 0.06, lam(0xd8e6f2, 0xd8e6f2, 0.5), 0, 1.05, 0.84);
-  g.add(crack);
-  return g;
-}
-
-// Police helicopter: body + tail + spinning main rotor + SpotLight beam down.
-export function buildHeli() {
-  const g = new THREE.Group();
-  const bodyMat = lam(0x2456c8);
-  g.add(part(1.7, 1.25, 3.1, bodyMat, 0, 0, 0));
-  g.add(part(1.5, 0.9, 1.0, lam(0x1a2530), 0, 0.15, 1.15)); // glass nose
-  g.add(part(0.5, 0.5, 3.4, bodyMat, 0, 0.25, -2.8)); // tail boom
-  g.add(part(0.18, 1.1, 0.7, lam(0xf0f0f0), 0, 0.6, -4.3)); // tail fin
-  g.add(part(1.6, 0.14, 0.5, lam(0xf0f0f0), 0, -0.65, 0.6)); // belly stripe
+// Helicopter: body + glass nose + tail boom + tail fin + skids,
+// main rotor (spinning) + tail rotor, SpotLight beam down (fix #1:
+// staged low enough to sit inside the chase frame).
+export function buildHelicopter() {
+  const heli = new THREE.Group();
+  const bodyMat = lam(0x1d4ed8);
+  const body = box(2.0, 1.5, 3.4, bodyMat, 0, 0, 0);
+  const nose = box(1.7, 1.1, 1.0, lam(0x9fd8e8), 0, -0.1, -1.9);
+  const tail = box(0.5, 0.5, 4.2, bodyMat, 0, 0.25, 3.4);
+  const fin = box(0.14, 1.2, 0.9, lam(0xff2020), 0, 0.7, 5.3);
+  heli.add(body, nose, tail, fin);
+  heli.add(box(0.3, 0.3, 0.3, lam(0xfff6c0, 0xfff2a0, 1.8), -0.6, -0.4, -2.3));
+  heli.add(box(0.3, 0.3, 0.3, lam(0xfff6c0, 0xfff2a0, 1.8), 0.6, -0.4, -2.3));
   // skids
-  for (const s of [-1, 1]) {
-    g.add(part(0.1, 0.1, 2.6, lam(0x2c313a), s * 0.7, -0.85, 0));
-    g.add(part(0.08, 0.35, 0.08, lam(0x2c313a), s * 0.7, -0.68, 0.9));
-    g.add(part(0.08, 0.35, 0.08, lam(0x2c313a), s * 0.7, -0.68, -0.9));
-  }
+  heli.add(box(0.12, 0.12, 3.2, lam(0x222222), -0.9, -1.0, 0));
+  heli.add(box(0.12, 0.12, 3.2, lam(0x222222), 0.9, -1.0, 0));
+  heli.add(box(0.1, 0.3, 0.1, lam(0x222222), -0.9, -0.85, -1.2));
+  heli.add(box(0.1, 0.3, 0.1, lam(0x222222), 0.9, -0.85, -1.2));
+  heli.add(box(0.1, 0.3, 0.1, lam(0x222222), -0.9, -0.85, 1.2));
+  heli.add(box(0.1, 0.3, 0.1, lam(0x222222), 0.9, -0.85, 1.2));
   // main rotor (spins) + tail rotor
   const rotor = new THREE.Group();
-  rotor.add(part(7.2, 0.08, 0.3, lam(0x22262e), 0, 0, 0));
-  rotor.add(part(0.3, 0.08, 7.2, lam(0x22262e), 0, 0, 0));
-  rotor.position.y = 0.85;
-  g.add(rotor);
+  rotor.add(box(7.2, 0.08, 0.5, lam(0x222222), 0, 0, 0));
+  rotor.add(box(0.5, 0.08, 7.2, lam(0x222222), 0, 0, 0));
+  rotor.position.y = 0.95;
   const tailRotor = new THREE.Group();
-  tailRotor.add(part(0.08, 1.6, 0.14, lam(0x22262e), 0, 0, 0));
-  tailRotor.position.set(0.32, 0.6, -4.3);
-  g.add(tailRotor);
-  g.userData.rotor = rotor;
-  g.userData.tailRotor = tailRotor;
-  // searchlight: SpotLight aimed straight down + a visible beam cone
-  const spot = new THREE.SpotLight(0xffffff, 60, 60, 0.42, 0.5, 1.2);
-  spot.position.set(0, -0.5, 0.4);
+  tailRotor.add(box(0.08, 1.6, 0.12, lam(0x222222), 0, 0, 0));
+  tailRotor.add(box(0.08, 0.12, 1.6, lam(0x222222), 0, 0, 0));
+  tailRotor.position.set(0.35, 0.7, 5.3);
+  heli.add(rotor, tailRotor);
+  // spotlight beam: narrow translucent cone down + real SpotLight
+  const beamMat = new THREE.MeshLambertMaterial({
+    color: 0xfff8c0, transparent: true, opacity: 0.14, emissive: 0xfff2a0, emissiveIntensity: 0.5,
+  });
+  const beam = new THREE.Mesh(new THREE.ConeGeometry(2.2, 11, 16, 1, true), beamMat);
+  beam.position.y = -6.2;
+  beam.rotation.x = Math.PI; // cone opens downward
+  heli.add(beam);
+  const spot = new THREE.SpotLight(0xfff8d0, 60, 30, 0.32, 0.5, 1.2);
+  spot.position.set(0, -0.8, 0);
   const spotTarget = new THREE.Object3D();
-  spotTarget.position.set(0, -30, 0.4);
-  g.add(spotTarget);
+  spotTarget.position.set(0, -12, 0);
+  heli.add(spotTarget);
   spot.target = spotTarget;
-  g.add(spot);
-  const beamMat = new THREE.MeshBasicMaterial({ color: 0xfff8d8, transparent: true, opacity: 0.14, side: THREE.DoubleSide, depthWrite: false });
-  const beam = new THREE.Mesh(new THREE.ConeGeometry(2.2, 14, 12, 1, true), beamMat);
-  beam.rotation.x = Math.PI; // apex up at the heli
-  beam.position.set(0, -7.5, 0.4);
-  g.add(beam);
-  g.userData.spot = spot;
-  // red anti-collision beacon
-  const beacon = part(0.18, 0.18, 0.18, lam(0xff2020, 0xff2020, 2.5), 0, 0.75, -1.2);
-  g.add(beacon);
-  return g;
+  heli.add(spot);
+  heli.userData.rotor = rotor;
+  heli.userData.tailRotor = tailRotor;
+  heli.userData.kind = 'heli';
+  return heli;
 }
 
 export function animateHeli(heli, dt) {
-  if (heli.userData.rotor) heli.userData.rotor.rotation.y += dt * 14;
-  if (heli.userData.tailRotor) heli.userData.tailRotor.rotation.x += dt * 18;
+  if (heli.userData.rotor) heli.userData.rotor.rotation.y += dt * 22;
+  if (heli.userData.tailRotor) heli.userData.tailRotor.rotation.x += dt * 30;
 }

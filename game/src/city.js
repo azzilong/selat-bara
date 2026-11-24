@@ -1,324 +1,308 @@
-// city.js — Selat Bara: dense bright city grid, 5 districts, beach + sea.
-// All procedural Box/Cylinder geometry, MeshLambertMaterial, no textures.
+// city.js — SELAT BARA. Dense ±8x8 city grid, 5 named districts,
+// buildings attached to streets (no empty lots), 2-4 floors, bright
+// facades, beach + bright blue sea on the west side, palms, roads with
+// double yellow lines. Main roads 12u wide, side streets 8u (brief:
+// wide enough for 3 cars abreast). EVERY building gets procedural
+// windows — one InstancedMesh for all facades, one row per floor.
+// DISTRICTS is the single source of truth for HUD + map (fix #13).
 import * as THREE from 'three';
-import { buildCar } from './vehicleBuilder.js';
-import { buildCharacter as buildPerson } from './characterBuilder.js';
+import { lam } from './vehicleBuilder.js';
+import { buildSedan, buildVan } from './vehicleBuilder.js';
+import { buildPedestrian } from './characterBuilder.js';
 
-// Deterministic RNG so every screenshot run looks identical.
-export function mulberry32(seed) {
-  let a = seed >>> 0;
-  return function () {
-    a |= 0; a = (a + 0x6D2B79F5) | 0;
-    let t = Math.imul(a ^ (a >>> 15), 1 | a);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
+export const ROAD_LINES = [-84, -63, -42, -21, 0, 21, 42, 63, 84];
+export const MAIN_ROADS = new Set([0]); // x=0 and z=0 are the 12u mains
+export function roadWidth(v) { return MAIN_ROADS.has(v) ? 12 : 8; }
 
-const ROADS = [
-  { p: -63, w: 8 }, { p: -42, w: 8 }, { p: -21, w: 8 },
-  { p: 0, w: 12 },
-  { p: 21, w: 8 }, { p: 42, w: 8 }, { p: 63, w: 8 },
-];
-export const CITY_MIN = -88, CITY_MAX = 88;
-export const SEA_X = -96; // shoreline: sea west of this, sand strip to -88.
-
-// Single source of truth for districts (HUD, minimap and big map read this).
 export const DISTRICTS = [
-  { key: 'bara',  name: 'PELABUHAN BARA', street: 'Dermaga Bara',      color: 0x2f7fd0, standing: 'NEUTRAL', standingVal: 58, rect: { x0: -88, x1: -42, z0: -88, z1: 88 },  label: { x: -77, z: -31 } },
-  { key: 'tua',   name: 'KOTA TUA',       street: 'Jalan Kota Tua',    color: 0xe07b39, standing: 'NEUTRAL', standingVal: 47, rect: { x0: -42, x1: 4,   z0: -88, z1: 0 },   label: { x: -31, z: -52 } },
-  { key: 'pasar', name: 'PASAR LAMA',     street: 'Jalan Pasar Lama',  color: 0x4da65a, standing: 'WARY',    standingVal: 34, rect: { x0: -42, x1: 4,   z0: 0,   z1: 88 },  label: { x: -31, z: 52 } },
-  { key: 'kaca',  name: 'DISTRIK KACA',   street: 'Jalan Kaca',        color: 0x7fb3d5, standing: 'NEUTRAL', standingVal: 58, rect: { x0: 4,   x1: 88,  z0: -88, z1: 0 },   label: { x: 52,  z: -52 } },
-  { key: 'emas',  name: 'TANJUNG EMAS',   street: 'Jalan Tanjung Emas', color: 0xd9a83c, standing: 'NEUTRAL', standingVal: 58, rect: { x0: 4,   x1: 88,  z0: 0,   z1: 88 },  label: { x: 52,  z: 52 } },
+  { name: 'PELABUHAN BARA', street: 'Jl. Dermaga Bara', color: 0x4da6ff, standing: 'NEUTRAL', standingVal: 58, rect: [-96, -21, -84, 21], label: [-58, -30] },
+  { name: 'KOTA TUA', street: 'Jl. Merdeka Lama', color: 0xffd34d, standing: 'NEUTRAL', standingVal: 47, rect: [-21, 42, -84, -21], label: [10, -52] },
+  { name: 'PASAR LAMA', street: 'Jl. Pasar Lama', color: 0xff8c42, standing: 'WARY', standingVal: 34, rect: [-21, 42, -21, 42], label: [10, 31] },
+  { name: 'DISTRIK KACA', street: 'Jl. Kaca Raya', color: 0x7ddc7d, standing: 'NEUTRAL', standingVal: 58, rect: [42, 105, -84, 42], label: [73, -21] },
+  { name: 'TANJUNG EMAS', street: 'Jl. Tanjung Emas', color: 0xe88bb0, standing: 'NEUTRAL', standingVal: 58, rect: [-21, 105, 42, 105], label: [42, 73] },
 ];
-
 export function districtAt(x, z) {
   for (const d of DISTRICTS) {
-    if (x >= d.rect.x0 && x < d.rect.x1 && z >= d.rect.z0 && z < d.rect.z1) return d;
+    if (x >= d.rect[0] && x <= d.rect[1] && z >= d.rect[2] && z <= d.rect[3]) return d;
   }
-  return DISTRICTS[0];
+  return DISTRICTS[2];
 }
 
-const FACADES = [0xf6f1e7, 0xf0dfba, 0xa8c8e8, 0xe89a5a, 0xe87a6a, 0x7fc8b8, 0xf2c14e, 0xd8e6f2];
-const NEON = [0xff5a8a, 0x39d0ff, 0xffc23a, 0x7dff5e];
-const WINDOW_TONES = [0x2c3e50, 0x35485e, 0x22303e, 0x3d5a73];
+const FACADES = [0xffffff, 0xfff2cc, 0xcfe8ff, 0xffd9a0, 0xffe8e0, 0xd8f0d8];
+const PANE_TONES = [0x2b4a5e, 0x3a5a6e, 0x1f3a4d, 0x4a6a7e];
 
-function lam(color, emissive = 0x000000, ei = 1) {
-  return new THREE.MeshLambertMaterial({ color, emissive, emissiveIntensity: ei });
-}
 function box(w, h, d, mat, x = 0, y = 0, z = 0) {
   const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
   m.position.set(x, y, z);
-  m.castShadow = true; m.receiveShadow = true;
+  m.castShadow = true;
+  m.receiveShadow = true;
   return m;
 }
 
-function buildPalm() {
-  const g = new THREE.Group();
-  const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.22, 4.2, 7), lam(0x8a6a42));
-  trunk.position.y = 2.1; trunk.castShadow = true;
-  g.add(trunk);
-  const frondMat = lam(0x3f9e4d);
-  for (let i = 0; i < 6; i++) {
-    const f = new THREE.Mesh(new THREE.ConeGeometry(0.55, 2.4, 4), frondMat);
-    const a = (i / 6) * Math.PI * 2;
-    f.position.set(Math.cos(a) * 0.9, 4.5, Math.sin(a) * 0.9);
-    f.rotation.z = Math.cos(a) * 1.1; f.rotation.x = -Math.sin(a) * 1.1;
-    f.castShadow = true;
-    g.add(f);
-  }
-  const nuts = new THREE.Mesh(new THREE.SphereGeometry(0.28, 6, 5), lam(0x6b4a22));
-  nuts.position.y = 4.15; g.add(nuts);
-  return g;
-}
-
 export function buildCity(scene) {
-  const rng = mulberry32(20261124);
   const group = new THREE.Group();
-  const traffic = [];
-  const walkers = [];
+  const animated = { traffic: [], pedestrians: [] };
 
-  // --- ground, sea, sand ---
-  const ground = new THREE.Mesh(new THREE.PlaneGeometry(280, 210), lam(0x9c8f76));
-  ground.rotation.x = -Math.PI / 2; ground.position.set(0, 0, 0); ground.receiveShadow = true;
+  // --- ground: grass-green base, sand strip, bright blue sea (west) ---
+  const ground = new THREE.Mesh(new THREE.PlaneGeometry(230, 230), lam(0x8ecb6a));
+  ground.rotation.x = -Math.PI / 2;
+  ground.position.set(0, -0.05, 0);
+  ground.receiveShadow = true;
   group.add(ground);
-  const sea = new THREE.Mesh(new THREE.PlaneGeometry(48, 210), lam(0x2fa8d8));
-  sea.rotation.x = -Math.PI / 2; sea.position.set(-120, 0.04, 0); sea.receiveShadow = true;
-  group.add(sea);
-  const sand = new THREE.Mesh(new THREE.PlaneGeometry(8, 210), lam(0xe8d8a8));
-  sand.rotation.x = -Math.PI / 2; sand.position.set(-92, 0.05, 0); sand.receiveShadow = true;
+  const sand = new THREE.Mesh(new THREE.PlaneGeometry(12, 210), lam(0xf5e0a0));
+  sand.rotation.x = -Math.PI / 2;
+  sand.position.set(-90, 0, 0);
+  sand.receiveShadow = true;
   group.add(sand);
+  const sea = new THREE.Mesh(new THREE.PlaneGeometry(70, 230), lam(0x1e90d6, 0x0a5a8a, 0.4));
+  sea.rotation.x = -Math.PI / 2;
+  sea.position.set(-131, 0.02, 0);
+  sea.receiveShadow = true;
+  group.add(sea);
 
-  // --- roads: asphalt + double yellow centre lines + sidewalks ---
-  const asphaltMat = lam(0x33363d);
-  const lineMat = lam(0xd9b400);
-  const walkMat = lam(0xb5ac9c);
-  for (const r of ROADS) {
-    // vertical road (runs along z), x = r.p
-    const v = box(r.w, 0.06, 176, asphaltMat, r.p, 0.03, 0);
-    v.castShadow = false; group.add(v);
-    for (const off of [-0.4, 0.4]) {
-      const l = box(0.16, 0.02, 176, lineMat, r.p + off, 0.08, 0);
-      l.castShadow = false; group.add(l);
-    }
-    for (const s of [-1, 1]) {
-      const sw = box(2.2, 0.05, 176, walkMat, r.p + s * (r.w / 2 + 1.1), 0.04, 0);
-      sw.castShadow = false; group.add(sw);
-    }
-    // horizontal road (runs along x), z = r.p — starts at the shoreline, never crosses the sea
-    const h = box(184, 0.06, r.w, asphaltMat, -4, 0.03, r.p);
-    h.castShadow = false; group.add(h);
-    for (const off of [-0.4, 0.4]) {
-      const l = box(184, 0.02, 0.16, lineMat, -4, 0.08, r.p + off);
-      l.castShadow = false; group.add(l);
-    }
-    for (const s of [-1, 1]) {
-      const sw = box(184, 0.05, 2.2, walkMat, -4, 0.04, r.p + s * (r.w / 2 + 1.1));
-      sw.castShadow = false; group.add(sw);
+  // --- roads: full 9x9 grid, asphalt + sidewalks + centre lines ---
+  // Horizontal roads start at the shoreline (x -96) so they never cut the sea.
+  for (const v of ROAD_LINES) {
+    const w = roadWidth(v);
+    const asphalt = new THREE.MeshLambertMaterial({ color: 0x3d3d3d });
+    const walkMat = new THREE.MeshLambertMaterial({ color: 0xb8b8b0 });
+    // road along X (varying z)
+    const rx = box(201, 0.06, w, asphalt, -4.5, 0, v); // x -105..96
+    const rz = box(w, 0.06, 210, asphalt, v, 0, 0);
+    group.add(rx, rz);
+    // sidewalks hugging both edges
+    group.add(box(201, 0.1, 1.6, walkMat, -4.5, 0.02, v - w / 2 - 0.8));
+    group.add(box(201, 0.1, 1.6, walkMat, -4.5, 0.02, v + w / 2 + 0.8));
+    group.add(box(1.6, 0.1, 210, walkMat, v - w / 2 - 0.8, 0.02, 0));
+    group.add(box(1.6, 0.1, 210, walkMat, v + w / 2 + 0.8, 0.02, 0));
+    // double yellow centre lines on mains, dashed white on side streets
+    const lineMat = new THREE.MeshLambertMaterial({ color: 0xffd34d });
+    const dashMat = new THREE.MeshLambertMaterial({ color: 0xf5f5f5 });
+    if (MAIN_ROADS.has(v)) {
+      group.add(box(201, 0.02, 0.18, lineMat, -4.5, 0.05, v - 0.25));
+      group.add(box(201, 0.02, 0.18, lineMat, -4.5, 0.05, v + 0.25));
+      group.add(box(0.18, 0.02, 210, lineMat, v - 0.25, 0.05, 0));
+      group.add(box(0.18, 0.02, 210, lineMat, v + 0.25, 0.05, 0));
+    } else {
+      for (let p = -96; p <= 96; p += 8) {
+        group.add(box(3, 0.02, 0.18, dashMat, p, 0.05, v));
+        group.add(box(0.18, 0.02, 3, dashMat, v, 0.05, p));
+      }
     }
   }
 
-  // --- buildings: one or two per block, windows via a single InstancedMesh ---
-  // block spans along one axis: between neighbouring road edges
-  const spans = [];
-  let prev = -88;
-  for (const r of ROADS) { spans.push([prev + 0.6, r.p - r.w / 2 - 0.6]); prev = r.p + r.w / 2; }
-  spans.push([prev + 0.6, 88 - 0.6]);
-
-  const winXf = []; // {x, y, z, ry, tone}
-  const winGeo = new THREE.BoxGeometry(0.95, 1.25, 0.07);
-  const winMat = new THREE.MeshLambertMaterial({ color: 0xffffff });
-  const buildings = [];
-  for (const [x0, x1] of spans) {
-    for (const [z0, z1] of spans) {
-      const d = districtAt((x0 + x1) / 2, (z0 + z1) / 2);
-      const split = rng() < 0.45 && (x1 - x0) > 9;
-      const lots = split ? [[x0, (x0 + x1) / 2 - 0.4, z0, z1], [(x0 + x1) / 2 + 0.4, x1, z0, z1]] : [[x0, x1, z0, z1]];
-      for (const [lx0, lx1, lz0, lz1] of lots) {
-        const w = lx1 - lx0, dep = lz1 - lz0;
-        if (w < 3 || dep < 3) continue;
-        const floors = 2 + Math.floor(rng() * 3); // 2-4
-        const h = floors * 3.2;
-        const facade = FACADES[Math.floor(rng() * FACADES.length)];
-        const b = box(w, h, dep, lam(facade), (lx0 + lx1) / 2, h / 2, (lz0 + lz1) / 2);
+  // --- buildings: one per block cell, attached to streets, no empty lots ---
+  // Block bounds come from neighbouring road lines minus half the road
+  // width and the sidewalk, so no building ever overlaps a road.
+  const windowTransforms = [];
+  const winGeo = new THREE.BoxGeometry(1.0, 1.3, 0.08);
+  let seed = 7;
+  const rnd = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
+  const blocks = [];
+  for (let i = 0; i < ROAD_LINES.length - 1; i++) {
+    for (let j = 0; j < ROAD_LINES.length - 1; j++) {
+      const x0 = ROAD_LINES[i] + roadWidth(ROAD_LINES[i]) / 2 + 1.8;
+      const x1 = ROAD_LINES[i + 1] - roadWidth(ROAD_LINES[i + 1]) / 2 - 1.8;
+      const z0 = ROAD_LINES[j] + roadWidth(ROAD_LINES[j]) / 2 + 1.8;
+      const z1 = ROAD_LINES[j + 1] - roadWidth(ROAD_LINES[j + 1]) / 2 - 1.8;
+      if (x0 >= x1 || z0 >= z1) continue;
+      if (x1 < -84) continue; // beach strip: no buildings west of the shore road
+      blocks.push([x0, x1, z0, z1]);
+    }
+  }
+  const dummy = new THREE.Object3D();
+  for (const [x0, x1, z0, z1] of blocks) {
+    const bw = x1 - x0, bd = z1 - z0;
+    const cols = bw > 13 ? 2 : 1, rows = bd > 13 ? 2 : 1;
+    for (let ci = 0; ci < cols; ci++) {
+      for (let ri = 0; ri < rows; ri++) {
+        const w = bw / cols - 1.2, d = bd / rows - 1.2;
+        const cx = x0 + (bw / cols) * (ci + 0.5);
+        const cz = z0 + (bd / rows) * (ri + 0.5);
+        const floors = 2 + Math.floor(rnd() * 3); // 2-4 floors
+        const h = floors * 3;
+        const facade = FACADES[Math.floor(rnd() * FACADES.length)];
+        const b = box(w, h, d, lam(facade), cx, h / 2, cz);
         group.add(b);
-        buildings.push({ x: (lx0 + lx1) / 2, z: (lz0 + lz1) / 2, w, d: dep, h, floors, district: d });
-        // roof slab + props
-        const roof = box(w + 0.3, 0.25, dep + 0.3, lam(0x6b6258), (lx0 + lx1) / 2, h + 0.12, (lz0 + lz1) / 2);
-        group.add(roof);
-        if (rng() < 0.55) {
-          const ac = box(0.9, 0.5, 0.9, lam(0x9aa2ab), (lx0 + lx1) / 2 - w / 4, h + 0.5, (lz0 + lz1) / 2);
-          group.add(ac);
+        // parapet + rooftop props (AC, water tank, antenna)
+        group.add(box(w + 0.3, 0.25, d + 0.3, lam(0x8a8a8a), cx, h + 0.12, cz));
+        if (rnd() > 0.4) group.add(box(1.1, 0.7, 0.9, lam(0xb8b8b8), cx - w / 4, h + 0.6, cz));
+        if (rnd() > 0.5) {
+          const tank = new THREE.Mesh(new THREE.CylinderGeometry(0.7, 0.7, 1.4, 10), lam(0x7fb3d5));
+          tank.position.set(cx + w / 4, h + 0.9, cz - d / 4);
+          tank.castShadow = true;
+          group.add(tank);
         }
-        if (rng() < 0.4) {
-          const tank = new THREE.Mesh(new THREE.CylinderGeometry(0.55, 0.55, 1.1, 8), lam(0x7a8894));
-          tank.position.set((lx0 + lx1) / 2 + w / 4, h + 0.8, (lz0 + lz1) / 2);
-          tank.castShadow = true; group.add(tank);
-        }
-        if (rng() < 0.35) {
-          const ant = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 2.2, 5), lam(0x555c66));
-          ant.position.set((lx0 + lx1) / 2, h + 1.3, (lz0 + lz1) / 2 - dep / 4);
+        if (rnd() > 0.5) {
+          const ant = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.08, 2.4, 6), lam(0x666666));
+          ant.position.set(cx + w / 3, h + 1.4, cz + d / 4);
           group.add(ant);
         }
-        // neon sign on some facades
-        if (rng() < 0.3) {
-          const neon = NEON[Math.floor(rng() * NEON.length)];
-          const sign = box(0.18, 2.2, 0.9, lam(neon, neon, 1.6), (lx0 + lx1) / 2 + (rng() < 0.5 ? -1 : 1) * (w / 2 + 0.12), h * 0.62, (lz0 + lz1) / 2);
-          group.add(sign);
+        // shopfront awning on the street side for ground-floor shops
+        if (rnd() > 0.55) {
+          const awn = box(w * 0.8, 0.12, 1.4, lam([0xe8641b, 0x2e86c1, 0x1e9e4a][Math.floor(rnd() * 3)]), cx, 3.1, cz - d / 2 - 0.5);
+          group.add(awn);
         }
-        // shopfront awning in Pasar Lama
-        if (d.key === 'pasar' && rng() < 0.6) {
-          const awn = box(w * 0.7, 0.12, 1.4, lam(0xd94f3d), (lx0 + lx1) / 2, 3.1, (lz0 + lz1) / 2 + dep / 2 + 0.6);
-          awn.rotation.x = 0.25; group.add(awn);
-        }
-        // windows: one row per floor, on all four facades
+        // windows: one row per floor on every facade, varying pane tone
+        const nx = Math.max(2, Math.floor(w / 2.2));
+        const nz = Math.max(2, Math.floor(d / 2.2));
         for (let f = 0; f < floors; f++) {
-          const y = 1.9 + f * 3.2;
-          const colsX = Math.max(1, Math.floor(w / 1.9));
-          const colsZ = Math.max(1, Math.floor(dep / 1.9));
-          for (let i = 0; i < colsX; i++) {
-            const wx = lx0 + 1.1 + (i + 0.5) * ((w - 2.2) / colsX);
-            const tone = rng() < 0.12 ? 0xffd27a : WINDOW_TONES[Math.floor(rng() * WINDOW_TONES.length)];
-            winXf.push({ x: wx, y, z: lz1 + 0.05, ry: 0, tone });
-            winXf.push({ x: wx, y, z: lz0 - 0.05, ry: Math.PI, tone });
+          const wy = 1.8 + f * 3;
+          for (let k = 0; k < nx; k++) {
+            const wx = cx - w / 2 + (k + 0.5) * (w / nx);
+            dummy.position.set(wx, wy, cz - d / 2 - 0.05);
+            dummy.rotation.set(0, 0, 0);
+            dummy.updateMatrix();
+            windowTransforms.push({ m: dummy.matrix.clone(), tone: Math.floor(rnd() * 4) });
+            dummy.position.set(wx, wy, cz + d / 2 + 0.05);
+            dummy.rotation.set(0, Math.PI, 0);
+            dummy.updateMatrix();
+            windowTransforms.push({ m: dummy.matrix.clone(), tone: Math.floor(rnd() * 4) });
           }
-          for (let i = 0; i < colsZ; i++) {
-            const wz = lz0 + 1.1 + (i + 0.5) * ((dep - 2.2) / colsZ);
-            const tone = rng() < 0.12 ? 0xffd27a : WINDOW_TONES[Math.floor(rng() * WINDOW_TONES.length)];
-            winXf.push({ x: lx1 + 0.05, y, z: wz, ry: Math.PI / 2, tone });
-            winXf.push({ x: lx0 - 0.05, y, z: wz, ry: -Math.PI / 2, tone });
+          for (let k = 0; k < nz; k++) {
+            const wz = cz - d / 2 + (k + 0.5) * (d / nz);
+            dummy.position.set(cx - w / 2 - 0.05, wy, wz);
+            dummy.rotation.set(0, -Math.PI / 2, 0);
+            dummy.updateMatrix();
+            windowTransforms.push({ m: dummy.matrix.clone(), tone: Math.floor(rnd() * 4) });
+            dummy.position.set(cx + w / 2 + 0.05, wy, wz);
+            dummy.rotation.set(0, Math.PI / 2, 0);
+            dummy.updateMatrix();
+            windowTransforms.push({ m: dummy.matrix.clone(), tone: Math.floor(rnd() * 4) });
           }
         }
       }
     }
   }
-  const winMesh = new THREE.InstancedMesh(winGeo, winMat, winXf.length);
-  const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler(), v = new THREE.Vector3(), s = new THREE.Vector3(1, 1, 1);
-  const col = new THREE.Color();
-  winXf.forEach((w, i) => {
-    e.set(0, w.ry, 0); q.setFromEuler(e); v.set(w.x, w.y, w.z);
-    m4.compose(v, q, s); winMesh.setMatrixAt(i, m4);
-    winMesh.setColorAt(i, col.setHex(w.tone));
+  // ONE InstancedMesh for every window in the city (single material,
+  // per-instance colour for the varying pane tones).
+  const winMesh = new THREE.InstancedMesh(winGeo, lam(0xffffff, 0x0a1a24, 0.25), windowTransforms.length);
+  windowTransforms.forEach((t, i) => {
+    winMesh.setMatrixAt(i, t.m);
+    winMesh.setColorAt(i, new THREE.Color(PANE_TONES[t.tone]));
   });
   winMesh.instanceMatrix.needsUpdate = true;
-  if (winMesh.instanceColor) winMesh.instanceColor.needsUpdate = true;
   group.add(winMesh);
 
-  // --- palms: on sidewalks (never on road centrelines) + beach row ---
-  const palmSpots = [];
-  for (const r of ROADS) {
-    for (let z = -80; z <= 80; z += 21) {
-      if (rng() < 0.6) palmSpots.push([r.p + (r.w / 2 + 1.7), z + 5]);
-      if (rng() < 0.6) palmSpots.push([r.p - (r.w / 2 + 1.7), z - 5]);
+  // --- street furniture: benches, hydrants, bins, bus stop, traffic lights ---
+  const furnMat = lam(0x5a5a5a);
+  for (const v of ROAD_LINES) {
+    for (let p = -84; p <= 84; p += 21) {
+      if (Math.abs(v) === 0 && p % 42 === 0) continue;
+      const onXRoad = rnd() > 0.5;
+      const fx = onXRoad ? p : v + roadWidth(v) / 2 + 1.4;
+      const fz = onXRoad ? v + roadWidth(v) / 2 + 1.4 : p;
+      if (fx < -84 || fx > 100 || fz < -100 || fz > 100) continue;
+      const pick = rnd();
+      if (pick > 0.7) { // bench
+        group.add(box(1.8, 0.1, 0.5, lam(0x8a5a2a), fx, 0.45, fz));
+        group.add(box(1.8, 0.5, 0.1, lam(0x8a5a2a), fx, 0.7, fz + 0.22));
+        group.add(box(0.1, 0.45, 0.4, furnMat, fx - 0.8, 0.22, fz));
+        group.add(box(0.1, 0.45, 0.4, furnMat, fx + 0.8, 0.22, fz));
+      } else if (pick > 0.45) { // hydrant (red) + bin (green)
+        const hyd = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.26, 0.7, 8), lam(0xd43d2a));
+        hyd.position.set(fx, 0.35, fz);
+        hyd.castShadow = true;
+        group.add(hyd);
+        group.add(box(0.5, 0.8, 0.5, lam(0x1e9e4a), fx + 0.9, 0.4, fz));
+      } else { // traffic light pole
+        group.add(box(0.14, 3.4, 0.14, furnMat, fx, 1.7, fz));
+        group.add(box(0.4, 0.9, 0.3, lam(0x222222), fx, 3.2, fz));
+        group.add(box(0.2, 0.2, 0.05, lam(0x22cc44, 0x22cc44, 1.5), fx, 3.35, fz - 0.18));
+      }
     }
   }
-  for (let z = -84; z <= 84; z += 14) palmSpots.push([-91, z]);
-  for (const [px, pz] of palmSpots) {
-    const palm = buildPalm();
-    palm.position.set(px, 0, pz);
-    palm.rotation.y = rng() * Math.PI * 2;
-    group.add(palm);
-  }
-
-  // --- street furniture ---
-  const benchMat = lam(0x8a6a42), hydMat = lam(0xc22e2e), binMat = lam(0x3a4048);
-  function bench(x, z, ry) {
-    const g = new THREE.Group();
-    g.add(box(1.8, 0.12, 0.55, benchMat, 0, 0.55, 0));
-    g.add(box(1.8, 0.7, 0.1, benchMat, 0, 0.85, -0.24));
-    g.add(box(0.12, 0.55, 0.5, benchMat, -0.75, 0.28, 0));
-    g.add(box(0.12, 0.55, 0.5, benchMat, 0.75, 0.28, 0));
-    g.position.set(x, 0, z); g.rotation.y = ry; group.add(g);
-  }
-  bench(-7.8, -14, Math.PI / 2); bench(7.8, 30, -Math.PI / 2); bench(-28, 7.8, 0); bench(49, -7.8, Math.PI);
-  for (const [hx, hz] of [[-7.5, 8], [7.5, -28], [28.5, 7.5], [-28.5, -49]]) {
-    const hyd = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.22, 0.65, 8), hydMat);
-    hyd.position.set(hx, 0.33, hz); hyd.castShadow = true; group.add(hyd);
-    const bin = new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.3, 0.8, 8), binMat);
-    bin.position.set(hx + 1.2, 0.4, hz + 1.2); bin.castShadow = true; group.add(bin);
-  }
-  // bus stop (kept clear of the action1 camera lane)
+  // bus stop (kept off the action1 camera axis — was at (7.5,0,21))
   const bus = new THREE.Group();
-  bus.add(box(0.12, 2.4, 0.12, lam(0x3a4048), -1.4, 1.2, 0));
-  bus.add(box(0.12, 2.4, 0.12, lam(0x3a4048), 1.4, 1.2, 0));
-  bus.add(box(3.2, 0.12, 1.4, lam(0x2f7fd0), 0, 2.5, 0));
-  bus.add(box(3.0, 0.9, 0.08, lam(0x9fc8e8), 0, 1.6, -0.6));
-  bus.add(box(2.6, 0.1, 0.5, benchMat, 0, 0.55, -0.3));
-  bus.position.set(28.5, 0, -49); group.add(bus);
-  // traffic light at the main intersection
-  const tl = new THREE.Group();
-  tl.add(box(0.18, 5.2, 0.18, lam(0x2c313a), 0, 2.6, 0));
-  tl.add(box(0.5, 1.4, 0.4, lam(0x22262e), 0, 5.0, 0));
-  tl.add(box(0.3, 0.3, 0.1, lam(0xff2a2a, 0xff2a2a, 1.8), 0, 5.4, 0.22));
-  tl.add(box(0.3, 0.3, 0.1, lam(0xffc23a, 0xffc23a, 1.8), 0, 5.0, 0.22));
-  tl.add(box(0.3, 0.3, 0.1, lam(0x2aff5e, 0x2aff5e, 1.8), 0, 4.6, 0.22));
-  tl.position.set(6.8, 0, 6.8); group.add(tl);
+  bus.add(box(3.2, 0.12, 1.6, lam(0x2e86c1), 0, 2.6, 0));
+  bus.add(box(0.12, 2.6, 0.12, furnMat, -1.5, 1.3, -0.7));
+  bus.add(box(0.12, 2.6, 0.12, furnMat, 1.5, 1.3, -0.7));
+  bus.add(box(0.12, 2.6, 0.12, furnMat, -1.5, 1.3, 0.7));
+  bus.add(box(0.12, 2.6, 0.12, furnMat, 1.5, 1.3, 0.7));
+  bus.add(box(3.0, 0.5, 0.4, lam(0x8a5a2a), 0, 0.5, 0.6));
+  bus.position.set(28.5, 0, -49);
+  group.add(bus);
 
-  // --- parked cars + moving traffic + pedestrians ---
-  const parkedDefs = [
-    { x: -8, z: -30, ry: 0, color: 0x3a6fd8 },
-    { x: 8.5, z: 12, ry: Math.PI, color: 0xe8e8e8 },
-    { x: -29, z: -8.5, ry: Math.PI / 2, color: 0x3aa655 },
-    { x: 29.5, z: 8.5, ry: -Math.PI / 2, color: 0xd9a83c },
-    { x: 50, z: -29, ry: 0, color: 0x8a5ad8 },
-    { x: -50, z: 50, ry: Math.PI, color: 0x5a6068 },
-  ];
-  for (const p of parkedDefs) {
-    const car = buildCar({ kind: 'sedan', color: p.color });
-    car.position.set(p.x, 0, p.z); car.rotation.y = p.ry; group.add(car);
+  // --- neon signs on a few facades (emissive, midday-visible) ---
+  const neonCols = [0xff2a7a, 0x22d3ee, 0xffd34d, 0x7ddc7d];
+  for (let i = 0; i < 10; i++) {
+    const nx = ROAD_LINES[1 + (i % 7)] + 8;
+    const nz = ROAD_LINES[(i * 3) % 8] + 8;
+    const c = neonCols[i % neonCols.length];
+    const sign = box(0.3, 1.6 + (i % 3) * 0.5, 2.2, lam(c, c, 1.8), nx, 4.5, nz);
+    group.add(sign);
   }
-  const trafficDefs = [
-    { axis: 'z', line: -21, from: -80, to: 80, speed: 9, color: 0xe8e8e8, t: 0.3 },
-    { axis: 'x', line: 21, from: -80, to: 80, speed: -7, color: 0xd94f3d, t: 0.6 },
-    { axis: 'z', line: 42, from: 80, to: -80, speed: 8, color: 0x3a6fd8, t: 0.1 },
-  ];
-  for (const def of trafficDefs) {
-    const car = buildCar({ kind: 'sedan', color: def.color });
-    const p = THREE.MathUtils.lerp(def.from, def.to, def.t);
-    car.position.set(def.axis === 'z' ? def.line + 2 : p, 0, def.axis === 'z' ? p : def.line - 2);
-    car.rotation.y = def.axis === 'z' ? (def.speed > 0 ? 0 : Math.PI) : (def.speed > 0 ? Math.PI / 2 : -Math.PI / 2);
-    group.add(car);
-    traffic.push({ mesh: car, ...def, t: def.t });
+
+  // --- palms: sidewalks only (never on road centrelines) + beach row ---
+  function palm(x, z) {
+    const p = new THREE.Group();
+    const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.28, 4.4, 7), lam(0x8a5a2a));
+    trunk.position.y = 2.2;
+    trunk.castShadow = true;
+    p.add(trunk);
+    for (let k = 0; k < 6; k++) {
+      const frond = box(0.25, 0.08, 2.2, lam(0x2fae4e), 0, 4.5, 0);
+      const holder = new THREE.Group();
+      holder.rotation.y = (k / 6) * Math.PI * 2;
+      frond.position.z = 1.0;
+      frond.rotation.x = 0.5;
+      holder.add(frond);
+      holder.position.y = 4.4;
+      p.add(holder);
+    }
+    p.position.set(x, 0, z);
+    group.add(p);
   }
-  const walkerDefs = [
-    { x: -7.8, z: -40, axis: 'z', from: -60, to: 20, speed: 1.4 },
-    { x: 7.8, z: 10, axis: 'z', from: -20, to: 60, speed: -1.2 },
-    { x: -30, z: 7.8, axis: 'x', from: -60, to: 10, speed: 1.1 },
-    { x: 40, z: -7.8, axis: 'x', from: 0, to: 70, speed: -1.5 },
-    { x: -52, z: 28.5, axis: 'x', from: -70, to: -30, speed: 1.3 },
-    { x: 52, z: -28.5, axis: 'x', from: 30, to: 70, speed: -1.2 },
-    { x: -7.8, z: 60, axis: 'z', from: 30, to: 80, speed: 1.0 },
-    { x: 28.5, z: 7.8, axis: 'x', from: 10, to: 60, speed: -1.4 },
-  ];
-  const walkerSkins = [0xc68e5e, 0x8a5a3a, 0xe8b98a, 0x6b4226];
-  const walkerShirts = [0x3a6fd8, 0xe8e8e8, 0xd9a83c, 0x4da65a, 0xe87a6a, 0x7fb3d5, 0x8a5ad8, 0x3aa655];
-  walkerDefs.forEach((def, i) => {
-    const w = buildPerson({ skin: walkerSkins[i % 4], shirt: walkerShirts[i], pants: 0x2c313a, shoes: 0x222222, hair: 0x2a2018, role: 'pedestrian' });
-    w.position.set(def.x, 0, def.z);
-    group.add(w);
-    walkers.push({ mesh: w, ...def, phase: rng() * 6 });
-  });
+  for (const v of ROAD_LINES) {
+    for (let p = -73; p <= 84; p += 21) {
+      palm(v + roadWidth(v) / 2 + 1.4, p);
+      palm(v - roadWidth(v) / 2 - 1.4, p + 10);
+    }
+  }
+  for (let z = -84; z <= 84; z += 14) palm(-93, z); // beach row
+
+  // --- parked cars + moving traffic + strolling pedestrians ---
+  const parkedSpots = [[10, -10], [10, 31], [-10, 52], [31, -31], [52, 10], [-31, -52]];
+  for (const [px, pz] of parkedSpots) {
+    const c = Math.random() > 0.5 ? buildSedan() : buildVan();
+    c.position.set(px, 0, pz);
+    c.rotation.y = (Math.abs(px) > Math.abs(pz) ? 0 : Math.PI / 2) + (Math.random() > 0.5 ? 0 : Math.PI);
+    group.add(c);
+  }
+  for (let i = 0; i < 3; i++) {
+    const t = buildSedan();
+    const axis = i % 2 === 0;
+    t.position.set(axis ? ROAD_LINES[2 + i] : -63 + i * 21, 0, axis ? -63 + i * 42 : ROAD_LINES[3 + i]);
+    t.rotation.y = axis ? 0 : Math.PI / 2;
+    group.add(t);
+    animated.traffic.push({ mesh: t, axis, speed: 4 + i, dir: i % 2 === 0 ? 1 : -1, road: axis ? ROAD_LINES[2 + i] : ROAD_LINES[3 + i] });
+  }
+  for (let i = 0; i < 8; i++) {
+    const ped = buildPedestrian(i);
+    const v = ROAD_LINES[1 + (i % 7)];
+    ped.position.set(v + roadWidth(v) / 2 + 1.4, 0, -70 + i * 20);
+    ped.rotation.y = Math.PI / 2;
+    group.add(ped);
+    animated.pedestrians.push({ mesh: ped, z0: -70 + i * 20, speed: 0.8 + (i % 3) * 0.3, phase: i });
+  }
 
   scene.add(group);
-  return {
-    group, buildings, traffic, walkers,
-    update(dt) {
-      for (const t of traffic) {
-        t.t += (t.speed * dt) / (t.to - t.from);
-        if (t.t > 1) t.t = 0; if (t.t < 0) t.t = 1;
-        const p = THREE.MathUtils.lerp(t.from, t.to, t.t);
-        if (t.axis === 'z') t.mesh.position.z = p; else t.mesh.position.x = p;
-      }
-      for (const w of walkers) {
-        w.phase += dt * 2;
-        const span = w.to - w.from;
-        let p = w.from + ((w.phase * Math.abs(w.speed) * 0.5) % span);
-        if (w.speed < 0) p = w.to - ((w.phase * Math.abs(w.speed) * 0.5) % span);
-        if (w.axis === 'z') { w.mesh.position.z = p; w.mesh.rotation.y = w.speed > 0 ? 0 : Math.PI; }
-        else { w.mesh.position.x = p; w.mesh.rotation.y = w.speed > 0 ? Math.PI / 2 : -Math.PI / 2; }
-        const legSwing = Math.sin(w.phase * 4) * 0.35;
-        if (w.mesh.userData.legL) { w.mesh.userData.legL.rotation.x = legSwing; w.mesh.userData.legR.rotation.x = -legSwing; }
-      }
-    },
-  };
+  return { group, animated };
+}
+
+export function updateCity(city, t, dt) {
+  for (const tr of city.animated.traffic) {
+    if (tr.axis) {
+      tr.mesh.position.z += tr.speed * tr.dir * dt;
+      if (tr.mesh.position.z > 100) tr.mesh.position.z = -100;
+      if (tr.mesh.position.z < -100) tr.mesh.position.z = 100;
+    } else {
+      tr.mesh.position.x += tr.speed * tr.dir * dt;
+      if (tr.mesh.position.x > 100) tr.mesh.position.x = -100;
+      if (tr.mesh.position.x < -100) tr.mesh.position.x = 100;
+    }
+  }
+  for (const pd of city.animated.pedestrians) {
+    pd.mesh.position.z = pd.z0 + Math.sin(t * 0.1 * pd.speed + pd.phase) * 12;
+  }
 }

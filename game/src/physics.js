@@ -1,116 +1,105 @@
-// physics.js — Selat Bara arcade physics: simple car + foot controllers,
-// camera rig (low chase behind the car, over-shoulder on foot). No libraries.
+// physics.js — SELAT BARA. Simple arcade car physics (forward, reverse,
+// steer, drag, city clamp), foot controller, and the camera rig
+// (over-the-shoulder on foot, low chase behind the car, FOV kick).
 import * as THREE from 'three';
-import { CITY_MIN, CITY_MAX } from './city.js';
 
 export class CarController {
   constructor(mesh) {
     this.mesh = mesh;
-    this.heading = Math.PI; // facing -Z (north) by default
     this.speed = 0;
-    this.pos = new THREE.Vector3(0, 0, 12);
-    this.maxSpeed = 30;
+    this.heading = Math.PI; // front faces -Z at heading 0; start facing +Z
+    this.maxSpeed = 26;
     this.maxReverse = 10;
   }
   update(dt, input) {
-    const accel = 14, brake = 26, drag = 6;
+    const accel = 16, brake = 26, drag = 4.5;
     if (input.forward) this.speed += accel * dt;
-    if (input.back) this.speed -= (this.speed > 0.5 ? brake : accel * 0.7) * dt;
+    if (input.back) this.speed -= brake * dt;
     if (!input.forward && !input.back) {
       const s = Math.sign(this.speed);
       this.speed -= s * drag * dt;
       if (Math.sign(this.speed) !== s) this.speed = 0;
     }
-    this.speed = THREE.MathUtils.clamp(this.speed, -this.maxReverse, this.maxSpeed);
+    this.speed = Math.max(-this.maxReverse, Math.min(this.maxSpeed, this.speed));
     const steer = (input.left ? 1 : 0) - (input.right ? 1 : 0);
-    const steerAuthority = THREE.MathUtils.clamp(Math.abs(this.speed) / 8, 0, 1);
-    this.heading += steer * 1.9 * steerAuthority * dt * Math.sign(this.speed || 1);
-    this.pos.x += Math.sin(this.heading) * this.speed * dt;
-    this.pos.z += Math.cos(this.heading) * this.speed * dt;
-    // keep inside the city grid
-    this.pos.x = THREE.MathUtils.clamp(this.pos.x, CITY_MIN + 2, CITY_MAX - 2);
-    this.pos.z = THREE.MathUtils.clamp(this.pos.z, CITY_MIN + 2, CITY_MAX - 2);
-    this.mesh.position.set(this.pos.x, 0, this.pos.z);
+    if (Math.abs(this.speed) > 0.1) {
+      this.heading += steer * 1.9 * dt * Math.sign(this.speed);
+    }
+    const dx = Math.sin(this.heading) * this.speed * dt;
+    const dz = Math.cos(this.heading) * this.speed * dt;
+    this.mesh.position.x = THREE.MathUtils.clamp(this.mesh.position.x + dx, -100, 100);
+    this.mesh.position.z = THREE.MathUtils.clamp(this.mesh.position.z + dz, -100, 100);
     this.mesh.rotation.y = this.heading;
-    return Math.abs(this.speed);
+    return this.speed;
   }
 }
 
 export class FootController {
   constructor(mesh) {
     this.mesh = mesh;
-    this.pos = new THREE.Vector3(0, 0, 14);
-    this.heading = Math.PI;
-    this.walkPhase = 0;
+    this.speed = 0;
   }
-  update(dt, input, camHeading) {
+  update(dt, input, camYaw) {
     let mx = 0, mz = 0;
     if (input.forward) mz -= 1;
     if (input.back) mz += 1;
     if (input.left) mx -= 1;
     if (input.right) mx += 1;
-    if (mx || mz) {
-      const len = Math.hypot(mx, mz);
+    const len = Math.hypot(mx, mz);
+    this.speed = len > 0 ? 6 : 0;
+    if (len > 0) {
       mx /= len; mz /= len;
-      const sin = Math.sin(camHeading), cos = Math.cos(camHeading);
+      const sin = Math.sin(camYaw), cos = Math.cos(camYaw);
       const wx = mx * cos - mz * sin;
       const wz = mx * sin + mz * cos;
-      const speed = 6;
-      this.pos.x += wx * speed * dt;
-      this.pos.z += wz * speed * dt;
-      this.heading = Math.atan2(wx, wz);
-      this.walkPhase += dt * 9;
+      this.mesh.position.x = THREE.MathUtils.clamp(this.mesh.position.x + wx * 6 * dt, -100, 100);
+      this.mesh.position.z = THREE.MathUtils.clamp(this.mesh.position.z + wz * 6 * dt, -100, 100);
+      this.mesh.rotation.y = Math.atan2(wx, wz);
     }
-    this.pos.x = THREE.MathUtils.clamp(this.pos.x, CITY_MIN + 2, CITY_MAX - 2);
-    this.pos.z = THREE.MathUtils.clamp(this.pos.z, CITY_MIN + 2, CITY_MAX - 2);
-    this.mesh.position.set(this.pos.x, 0, this.pos.z);
-    this.mesh.rotation.y = this.heading;
-    return Math.abs(mx) + Math.abs(mz) > 0;
+    return this.speed;
   }
 }
 
 export class CameraRig {
   constructor(camera) {
     this.camera = camera;
-    this.mode = 'foot'; // 'foot' | 'car' | 'fixed'
-    this.cur = new THREE.Vector3(6, 4, 26);
-    this.lookCur = new THREE.Vector3(0, 1.2, 0);
+    this.yaw = 0;
+    this.pitch = 0.12;
   }
-  followCar(carPos, heading, speed, dt) {
-    const back = 8.5 + speed * 0.08;
-    const target = new THREE.Vector3(
-      carPos.x - Math.sin(heading) * back,
-      3.6 + speed * 0.02,
-      carPos.z - Math.cos(heading) * back,
+  // Low chase cam behind the car (cinematic, close to the road).
+  followCar(car, dt) {
+    const back = new THREE.Vector3(
+      car.position.x - Math.sin(car.rotation.y) * 9.5,
+      3.4,
+      car.position.z - Math.cos(car.rotation.y) * 9.5,
     );
-    const look = new THREE.Vector3(carPos.x + Math.sin(heading) * 6, 1.4, carPos.z + Math.cos(heading) * 6);
-    const k = 1 - Math.exp(-6 * dt);
-    this.cur.lerp(target, k);
-    this.lookCur.lerp(look, k);
-    this.camera.position.copy(this.cur);
-    this.camera.lookAt(this.lookCur);
-    this.camera.fov = 62 + Math.min(10, speed * 0.25);
-    this.camera.updateProjectionMatrix();
-  }
-  followFoot(footPos, heading, dt) {
-    const target = new THREE.Vector3(
-      footPos.x - Math.sin(heading) * 4.2,
-      2.6,
-      footPos.z - Math.cos(heading) * 4.2,
-    );
-    const look = new THREE.Vector3(footPos.x + Math.sin(heading) * 5, 1.5, footPos.z + Math.cos(heading) * 5);
-    const k = 1 - Math.exp(-8 * dt);
-    this.cur.lerp(target, k);
-    this.lookCur.lerp(look, k);
-    this.camera.position.copy(this.cur);
-    this.camera.lookAt(this.lookCur);
-    this.camera.fov = 62;
-    this.camera.updateProjectionMatrix();
-  }
-  snap(pos, look) {
-    this.cur.copy(pos);
-    this.lookCur.copy(look);
-    this.camera.position.copy(pos);
+    this.camera.position.lerp(back, 1 - Math.pow(0.001, dt));
+    const look = new THREE.Vector3(car.position.x, 1.4, car.position.z - 4);
     this.camera.lookAt(look);
+    const targetFov = 62 + Math.min(14, Math.abs(car.userData.speed || 0) * 0.5);
+    this.camera.fov += (targetFov - this.camera.fov) * dt * 3;
+    this.camera.updateProjectionMatrix();
+  }
+  // Over-the-shoulder when on foot.
+  followFoot(person, dt) {
+    const yaw = person.rotation.y;
+    const back = new THREE.Vector3(
+      person.position.x - Math.sin(yaw) * 3.2,
+      person.position.y + 2.6,
+      person.position.z - Math.cos(yaw) * 3.2,
+    );
+    this.camera.position.lerp(back, 1 - Math.pow(0.001, dt));
+    this.camera.lookAt(person.position.x, person.position.y + 1.4, person.position.z - 2.5);
+    this.camera.fov += (58 - this.camera.fov) * dt * 3;
+    this.camera.updateProjectionMatrix();
+  }
+  // Free orbit for the idle/title dolly.
+  orbit(center, radius, height, angle) {
+    this.camera.position.set(
+      center.x + Math.sin(angle) * radius,
+      height,
+      center.z + Math.cos(angle) * radius,
+    );
+    this.camera.lookAt(center.x, 2, center.z);
   }
 }

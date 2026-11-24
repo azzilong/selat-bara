@@ -1,42 +1,56 @@
 # SELAT BARA
 
-[![Selat Bara](https://make.fun/badge/gta6-01.svg)](https://make.fun/bounty/gta6-01)
-[![Rank](https://make.fun/badge/gta6-01/azzilong/selat-bara/rank.svg)](https://make.fun/bounty/gta6-01)
-[![Reward](https://make.fun/badge/gta6-01/azzilong/selat-bara/reward.svg)](https://make.fun/bounty/gta6-01)
+[![gta6-01](https://img.shields.io/badge/gta6--01-entry-blue)](https://make.fun)
+[![Three.js](https://img.shields.io/badge/Three.js-r160-049ef4)](https://threejs.org)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green)](./LICENSE)
 
-An original low-poly open-world crime game for the [gta6-01 bounty](https://make.fun/bounty/gta6-01) on make.fun. Built from zero — no copied assets, no textures, no GLB files. Everything is procedural Three.js geometry in bright midday sun.
+**SELAT BARA — Strait of Embers.** An original low-poly open-world crime
+game built from zero in Three.js. Bright midday sun, a dense living city
+on the strait, and one rogue courier against the whole town.
 
 ## Story
 
-Raka, a rogue courier, takes back the docks from the city syndicate — one getaway, one shootout, one chase at a time. The Selat Bara PD is already on his tail, from the docks of Pelabuhan Bara to the glass towers of Distrik Kaca.
+Raka, a rogue courier, stole the syndicate's ledger — and now the Selat
+Bara PD wants him. Outrun the patrol cars, survive the street shootout,
+and reach the docks before the heat closes in.
 
 ## The city
 
-Five named districts — Pelabuhan Bara, Kota Tua, Pasar Lama, Distrik Kaca, Tanjung Emas — on a dense grid with a beach and bright blue sea on the west side, palms, neon signs, shopfront awnings, and windows on every building. Main roads are wide enough for three cars abreast; side streets fit two.
+Five districts — Pelabuhan Bara, Kota Tua, Pasar Lama, Distrik Kaca,
+Tanjung Emas — on a dense ±8x8 grid with windowed facades, rooftop props,
+neon signs, palms, and a bright blue sea on the west side. Main roads are
+12 units wide, side streets 8 — wide enough for three cars abreast.
 
 ## Missions
 
-- **M1 · The Getaway** — steal the sports car and lose the heli with 3 police cars on your tail. Wanted 3 stars.
-- **M2 · The Brutal Shootout** — hold the street behind a wrecked car against the gang: muzzle flash, tracers, blood, fallen bodies, cash and ammo drops.
-- **M3 · High Speed Chase** — drive-by shooting at the police car alongside you.
+1. **M1 · The Getaway** — steal the sports car, lose the heli (Wanted ★★★).
+2. **M2 · The Brutal Shootout** — clear the street, gang drops included.
+3. **M3 · High Speed Chase** — drive-by on a patrol car at 112 KM/H.
 
-## Features
+## Mode Bioskop
 
-- Free-roam: walk, drive, shoot, reload, switch weapons (Fists / Pistol / SMG).
-- Wanted system with named Selat Bara PD units (SBPD-7 BARA, SBPD-12 TANJUNG, SBPD-19 KACA, SBPD-AIR ELANG) and a live response panel with distances.
-- District standing, minimap with gold mission route and wanted radius, and a full city map with legend, POI labels and a standing list.
-- "Mode Bioskop" staging via URL: `?scene=action1`, `?scene=action2`, `?scene=action3`, `?scene=title`, `?scene=map` — frozen at the most dramatic frame, full HUD, 12:00 midday.
+Add a URL parameter to jump straight to a staged cinematic frame:
 
-## Play
+- `?scene=action1` — police chase with heli
+- `?scene=action2` — brutal street shootout
+- `?scene=action3` — drive-by shooting
+- `?scene=map` — full city map with legend and standings
+- `?scene=title` — title screen over the midday city
 
-Open `game/index.html` in a desktop browser (or serve `game/` over HTTP). Press **Enter** to play. **WASD** move / drive, **E** enter or exit the car, **Click / Space** shoot, **R** reload, **1 / 2 / 3** switch weapons.
+## Controls
 
-## Build
+WASD drive / walk · E enter car · F exit · Click / Space shoot ·
+R map · 1-3 weapons · Enter start.
 
-`main.ts` builds the submission dossier (text limit 163,840 bytes):
+## Tech
 
-```sh
-MAKEFUN_OUTPUT_DIR=out node main.ts
-```
+- Three.js r160 (vendored), WebGL, no network while playing.
+- No textures, no GLB/GLTF — every model is procedural Box/Capsule
+  geometry with solid flat Lambert colours.
+- HUD: mission panel, Selat Bara PD response panel with live distances,
+  district + standing, wanted status, weapon slots, minimap + full map.
+- Build: `MAKEFUN_OUTPUT_DIR=out node main.ts` (dossier ≤ 163,840 bytes).
 
-Referral code: `evq19zav`
+## License
+
+MIT — see [LICENSE](./LICENSE).
