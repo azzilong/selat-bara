@@ -1,56 +1,71 @@
+[![make.fun · gta6-01](https://make.fun/badge/gta6-01.svg)](https://make.fun/bounty/gta6-01?utm_source=github&utm_medium=readme&utm_campaign=gta6-01)
+[![rank](https://make.fun/badge/gta6-01/azzilong/selat-bara/rank.svg)](https://make.fun/bounty/gta6-01/leaderboard?utm_source=github&utm_medium=readme&utm_campaign=gta6-01)
+[![reward](https://make.fun/badge/gta6-01/azzilong/selat-bara/reward.svg)](https://make.fun/bounty/gta6-01?utm_source=github&utm_medium=readme&utm_campaign=gta6-01)
+
 # SELAT BARA
 
-[![gta6-01](https://img.shields.io/badge/gta6--01-entry-blue)](https://make.fun)
-[![Three.js](https://img.shields.io/badge/Three.js-r160-049ef4)](https://threejs.org)
-[![License: MIT](https://img.shields.io/badge/License-MIT-green)](./LICENSE)
+An original open-world crime game built from zero for the [make.fun](https://make.fun) gta6-01 bounty. Bright midday sun, a dense low-poly city, and a rogue courier who has run out of roads to run on.
 
-**SELAT BARA — Strait of Embers.** An original low-poly open-world crime
-game built from zero in Three.js. Bright midday sun, a dense living city
-on the strait, and one rogue courier against the whole town.
+## The story
 
-## Story
-
-Raka, a rogue courier, stole the syndicate's ledger — and now the Selat
-Bara PD wants him. Outrun the patrol cars, survive the street shootout,
-and reach the docks before the heat closes in.
+Raka is a courier who moves packages no one else will touch. One delivery goes wrong, the syndicate wants him quiet, and the Selat Bara PD wants him in cuffs — so now the whole city is after him. Steal the car, clear the street, lose the heat, and reach the docks before the net closes.
 
 ## The city
 
-Five districts — Pelabuhan Bara, Kota Tua, Pasar Lama, Distrik Kaca,
-Tanjung Emas — on a dense ±8x8 grid with windowed facades, rooftop props,
-neon signs, palms, and a bright blue sea on the west side. Main roads are
-12 units wide, side streets 8 — wide enough for three cars abreast.
+Selat Bara is a dense low-poly port city on a ±8x8 grid, five named districts pressed shoulder to shoulder with no empty lots:
+
+- **Pelabuhan Bara** — the docks, where every getaway ends
+- **Kota Tua** — the old town, narrow streets and tall facades
+- **Pasar Lama** — the old market, crowded stalls and tight corners
+- **Distrik Kaca** — the glass district, bright towers and wide avenues
+- **Tanjung Emas** — the golden cape, palm-lined roads by the sea
+
+One side of the city is a beach with bright blue sea. Buildings run 2–4 floors with bright facades — white, cream, light blue, orange — every one of them windowed, with rooftop props, neon signs, shopfront awnings, bus stops, benches, hydrants and palms so the streets read alive. Main roads are wide enough for three cars abreast; side streets take two. Roads carry double yellow lines.
 
 ## Missions
 
-1. **M1 · The Getaway** — steal the sports car, lose the heli (Wanted ★★★).
-2. **M2 · The Brutal Shootout** — clear the street, gang drops included.
-3. **M3 · High Speed Chase** — drive-by on a patrol car at 112 KM/H.
+- **M1 — The Getaway**: Raka in a sports car, chased by three police cars and a helicopter. Wanted: 3 stars.
+- **M2 — The Brutal Shootout**: Raka behind a wrecked car, trading fire with four armed enemies. Muzzle flash, blood, fallen bodies, cash and ammo drops. Objective: kill the gang.
+- **M3 — High Speed Chase**: a drive-by shooting from a speeding car, Raka leaning out of the window at the police car alongside.
 
 ## Mode Bioskop
 
-Add a URL parameter to jump straight to a staged cinematic frame:
+Every action scene is staged exactly, not left to random gameplay. Open the game with a scene parameter:
 
-- `?scene=action1` — police chase with heli
-- `?scene=action2` — brutal street shootout
-- `?scene=action3` — drive-by shooting
-- `?scene=map` — full city map with legend and standings
-- `?scene=title` — title screen over the midday city
+- `?scene=action1` — the police chase: cars, helicopter, crash
+- `?scene=action2` — the brutal street shootout: bodies, muzzle flash, cover
+- `?scene=action3` — the drive-by: parallel cars, shattered glass
+- `?scene=map` — the full city map: districts, legend, route, standings
+- `?scene=title` — the title screen over the bright midday city
+
+Each scene forces in-game time to 12:00, sets a cinematic camera (low behind the car, or over-the-shoulder when shooting), spawns the vehicles and NPCs exactly as described, hides the menus, shows the full HUD (Wanted, Health, Armour, Ammo, Minimap), and freezes at the most dramatic frame.
+
+## HUD
+
+GTA-style, all at once: mission panel with stage, next step and progress bar; the Selat Bara PD response panel with named units, roles and live distances in metres; wanted stars with a status line ("AIR UNIT DEPLOYED", "UNITS RESPONDING"); district name, street and standing above a gold-bordered minimap with a route line and wanted-radius circle; three weapon slots; money and clock top-right; speedometer with vehicle name and damage when driving.
 
 ## Controls
 
-WASD drive / walk · E enter car · F exit · Click / Space shoot ·
-R map · 1-3 weapons · Enter start.
+- **WASD** — move / drive
+- **E** — enter / exit car
+- **Click / Space** — shoot
+- **R** — reload
+- **1 / 2 / 3** — switch weapon (Fists / Pistol / SMG)
 
-## Tech
+## Tech notes
 
-- Three.js r160 (vendored), WebGL, no network while playing.
-- No textures, no GLB/GLTF — every model is procedural Box/Capsule
-  geometry with solid flat Lambert colours.
-- HUD: mission panel, Selat Bara PD response panel with live distances,
-  district + standing, wanted status, weapon slots, minimap + full map.
-- Build: `MAKEFUN_OUTPUT_DIR=out node main.ts` (dossier ≤ 163,840 bytes).
+- Three.js r160, vendored as an ES module — no network while playing
+- Bright flat solid colours everywhere, no textures, no GLB/GLTF
+- MeshLambertMaterial throughout; HemisphereLight (sky 0x87CEEB, ground 0xE0C090, 0.8) and DirectionalLight (0xFFF8E7, 1.5) with shadows; background 0x87CEEB, fog 0x87CEEB
+- Characters built from boxes and capsules with realistic proportions (head 1/7 of body height); cars are body + cabin + 4 wheels + glass + lights
+- Action effects are pure geometry: muzzle flash as a glowing yellow box, blood as red box particles and pools, car damage as grey smoke, police light bars with flashing red-blue emissive blocks, helicopter with spinning rotor and a spotlight beam
+- Entry: `game/index.html`, bootstrap `game/src/main.js`
+- Build program: `main.ts` (dossier ≤ 163,840 bytes)
+
+## Screenshots
+
+Four staged shots in `screenshots/` (mirrored in `game/screenshots/`): 1-action1 (the chase), 2-action2 (the shootout), 3-action3 (the drive-by), 4-map (the city map).
 
 ## License
 
-MIT — see [LICENSE](./LICENSE).
+MIT — see `LICENSE`.
