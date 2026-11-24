@@ -1,5 +1,5 @@
 // SELAT BARA — city builder (step 3).
-// Re-written in-session under recording 8 (gta6-01, 2026-11-24).
+// Re-written in-session under recording 9 (gta6-01, 2026-11-24).
 // Dense ±8x8 block grid, 5 named districts, buildings attached to the
 // streets (no empty lots), 2-4 floors, bright facades, beach + bright
 // blue sea on the west side, palms, double-yellow main roads.

@@ -1,5 +1,5 @@
 // SELAT BARA — vehicle builders (step 2).
-// Re-written in-session under recording 8 (gta6-01, 2026-11-24).
+// Re-written in-session under recording 9 (gta6-01, 2026-11-24).
 // All vehicles are pure Three.js geometry, solid MeshLambertMaterial,
 // no textures, no GLB. One shared material cache keeps the scene cheap.
 // Car spec (brief): body + cabin + 4 wheels + glass + lights, solid

@@ -1,5 +1,5 @@
 // SELAT BARA — main game (steps 1, 4-7 wired together).
-// Re-written in-session under recording 8 (gta6-01, 2026-11-24).
+// Re-written in-session under recording 9 (gta6-01, 2026-11-24).
 // Bright midday open-world crime game: free-roam (walk, drive, shoot,
 // 3 missions, wanted + police pursuit, busted / complete) plus the
 // frozen "Mode Bioskop" scenes (?scene=action1/2/3/title) for the
@@ -7,6 +7,9 @@
 // textures, no network while playing.
 // REBUILD: the staged scenes now get a Tracer (bullet beam) alongside
 // the muzzle flash, and free-roam shots fire tracer + sparks too.
+// REBUILD #3 FIX #11: free-roam now drives the full upgraded HUD —
+// district + standing, named police response with live distances,
+// weapon slots, money with the clock, vehicle name + damage.
 import * as THREE from 'three';
 import { buildCity, districtAt } from './city.js';
 import {
@@ -16,7 +19,7 @@ import {
 import { buildHero, buildEnemy, layFallen } from './characterBuilder.js';
 import { CarController, FootController, CameraRig } from './physics.js';
 import { Particles, MuzzleFlash, Tracer, shoot } from './weapons.js';
-import { stageScene, updateStaged } from './scenes.js';
+import { stageScene, updateStaged, buildResponseUnits } from './scenes.js';
 import { HUD } from './hud.js';
 
 window.addEventListener('error', (e) => { document.title = 'ERR: ' + e.message; });
@@ -118,13 +121,16 @@ let reloadLock = 0;
 let mission = 0;           // 0 M1, 1 M2, 2 M3, 3 done
 let gameMinutes = 0;       // clock ticks from 12:00 in free roam
 let enemies = [];          // { mesh, hp, alive, shootT }
-let police = [];           // pursuit cars { mesh, ctl, hp }
+let police = [];           // pursuit cars { mesh, ctl, hp, name, role }
 let marker = null;         // mission target beacon
 let heli = null;
 let m3Target = null;
+let carDamage = 0;         // hero car damage % (grows when shot while driving)
+let currentDistrict = '';  // last district shown in the HUD
+let responseT = 0;         // throttle for the police response panel
 
 const $ = (id) => document.getElementById(id);
-function setMoney(v) { money = v; $('money').textContent = '$ ' + v.toLocaleString('en-US'); }
+function setMoney(v) { money = v; hud.setMoney(money); }
 function setWanted(n) { wanted = n; hud.setWanted(n); }
 function setHealth(h) { health = Math.max(0, h); hud.setHealth(health); }
 function setArmour(a) { armour = Math.max(0, a); hud.setArmour(armour); }
@@ -132,6 +138,7 @@ function hurt(dmg) {
   const absorbed = Math.min(armour, dmg * 0.6);
   setArmour(armour - absorbed);
   setHealth(health - (dmg - absorbed));
+  if (driving) carDamage = Math.min(90, carDamage + 4);
   if (health <= 0) doBusted();
 }
 function doBusted() {
@@ -151,9 +158,44 @@ function respawn() {
   carCtl.pos.copy(heroCar.position);
   driving = false;
   hero.visible = true;
+  carDamage = 0;
   for (const p of police) scene.remove(p.mesh);
   police = [];
   heli = null;
+}
+
+// --- HUD helpers (fix #11): district standing + weapon slots -----------
+// Standing is a real per-district value the HUD shows; the brief's
+// staged scenes use the same numbers (M1 58, M2 34, M3 47).
+const STANDING = {
+  'Pelabuhan Bara': { street: 'Dermaga Bara', label: 'NEUTRAL', value: 58 },
+  'Kota Tua': { street: 'Jalan Kota Tua', label: 'NEUTRAL', value: 47 },
+  'Pasar Lama': { street: 'Jalan Pasar Lama', label: 'WARY', value: 34 },
+  'Distrik Kaca': { street: 'Jalan Kaca', label: 'NEUTRAL', value: 62 },
+  'Tanjung Emas': { street: 'Jalan Tanjung Emas', label: 'NEUTRAL', value: 41 },
+};
+function syncDistrict(x, z) {
+  const d = districtAt(x, z);
+  if (d.name === currentDistrict) return;
+  currentDistrict = d.name;
+  const s = STANDING[d.name] || { street: '', label: 'NEUTRAL', value: 50 };
+  hud.setDistrict(d.name, s.street, s.label, s.value);
+}
+function syncSlots() {
+  hud.setSlots([
+    { num: 1, label: 'FISTS', ammo: '∞', owned: true },
+    { num: 2, label: 'PISTOL', ammo: '', owned: false },
+    { num: 3, label: 'SMG', ammo: mag + '/' + reserve, owned: true },
+  ], 3);
+}
+function syncResponse() {
+  const heroPos = driving ? heroCar.position : hero.position;
+  const entries = police.map((p) => ({ mesh: p.mesh, name: p.name, role: p.role }));
+  if (heli) entries.push({ heli, name: 'SBPD-AIR ELANG', role: 'AIR UNIT' });
+  if (!entries.length) { hud.setResponse([], ''); return; }
+  const status = wanted >= 3 ? 'CONTROL: 3★ — air unit deployed'
+    : wanted >= 1 ? 'CONTROL: ' + wanted + '★ — units responding' : '';
+  hud.setResponse(buildResponseUnits(heroPos, entries), status);
 }
 
 // --- mission beacons -------------------------------------------------------
@@ -180,26 +222,31 @@ function makeMarker(x, z, color = 0xffd24a) {
 function setMission(i) {
   mission = i;
   if (i === 0) {
-    hud.setMission('M1 · THE GETAWAY', 'Get in the sports car');
+    hud.setMission('M1 · THE GETAWAY', 'Get in the sports car',
+      'STAGE 1/3 · STEAL THE CAR', 'Lose the heli', 0.15);
     makeMarker(0, 14, 0xffd24a);
   } else if (i === 1) {
-    hud.setMission('M2 · THE BRUTAL SHOOTOUT', 'Kill the gang');
+    hud.setMission('M2 · THE BRUTAL SHOOTOUT', 'Kill the gang',
+      'STAGE 2/3 · CLEAR THE STREET', 'Vanish', 0.45);
     spawnGang();
     makeMarker(-28, 28, 0xff2a1e);
     setWanted(3);
     spawnPursuit(2);
   } else if (i === 2) {
-    hud.setMission('M3 · HIGH SPEED CHASE', 'Drive-by the patrol car');
+    hud.setMission('M3 · HIGH SPEED CHASE', 'Drive-by the patrol car',
+      'STAGE 3/3 · LOSE THE HEAT', 'Reach the docks', 0.75);
     makeMarker(0, 0, 0x3b82f6);
     if (!m3Target) spawnPursuit(1, true);
   } else {
-    hud.setMission('SELAT BARA', 'All missions complete — the docks are yours');
+    hud.setMission('SELAT BARA', 'All missions complete — the docks are yours',
+      'COMPLETE', '', 1.0);
     if (marker) { scene.remove(marker); marker = null; }
     setMoney(money + 2500);
     $('complete').style.display = 'flex';
     setTimeout(() => { $('complete').style.display = 'none'; }, 5000);
     setWanted(0);
   }
+  syncSlots();
 }
 
 function spawnGang() {
@@ -213,6 +260,7 @@ function spawnGang() {
   }
 }
 
+const PURSUIT_NAMES = ['SBPD-7 BARA', 'SBPD-12 TANJUNG', 'SBPD-19 KACA'];
 function spawnPursuit(n, isM3 = false) {
   for (let i = 0; i < n; i++) {
     const p = buildPoliceCar();
@@ -220,7 +268,11 @@ function spawnPursuit(n, isM3 = false) {
     p.position.set(start[0], 0, start[1]);
     scene.add(p);
     const ctl = new CarController(p);
-    police.push({ mesh: p, ctl, hp: isM3 ? 3 : 99, isM3 });
+    police.push({
+      mesh: p, ctl, hp: isM3 ? 3 : 99, isM3,
+      name: PURSUIT_NAMES[police.length % PURSUIT_NAMES.length],
+      role: isM3 ? 'IN PURSUIT' : 'IN PURSUIT',
+    });
     if (isM3) m3Target = police[police.length - 1];
   }
   if (!heli && wanted >= 3) {
@@ -237,7 +289,11 @@ function toggleCar() {
     if (hero.position.distanceTo(heroCar.position) < 4.5) {
       driving = true;
       hero.visible = false;
-      if (mission === 0) setMission(0), hud.setMission('M1 · THE GETAWAY', 'Reach Pelabuhan Bara'), makeMarker(-100, 0, 0xffd24a);
+      if (mission === 0) {
+        hud.setMission('M1 · THE GETAWAY', 'Reach Pelabuhan Bara',
+          'STAGE 1/3 · STEAL THE CAR', 'Lose the heli', 0.3);
+        makeMarker(-100, 0, 0xffd24a);
+      }
     }
   } else {
     driving = false;
@@ -256,6 +312,7 @@ function reload() {
   reserve -= take;
   reloadLock = 0.8;
   hud.setAmmo('SMG', mag, reserve);
+  syncSlots();
 }
 
 // --- shooting ---------------------------------------------------------------
@@ -265,6 +322,7 @@ function fireWeapon() {
   if (reloadLock > 0 || mag <= 0) { if (mag <= 0) reload(); return; }
   mag--;
   hud.setAmmo('SMG', mag, reserve);
+  syncSlots();
   raycaster.setFromCamera(mouse, camera);
   if (!driving) {
     // on foot: gun tip -> aim point along the camera ray
@@ -410,7 +468,14 @@ if (sceneName) {
   setArmour(60);
   hud.setAmmo('SMG', mag, reserve);
   hud.setSpeed(0);
+  hud.setVehicle('SPORTS CAR', 0);
   hud.setClock('12:00');
+  hud.setMoney(250);
+  syncSlots();
+  syncDistrict(hero.position.x, hero.position.z);
+  hud.setResponse([], '');
+  hud.setRoute([{ x: 2, z: 20 }, { x: 0, z: 14 }]);
+  hud.drawMinimap();
 }
 
 function startFreeRoam() {
@@ -436,6 +501,7 @@ function frame() {
       if (driving) {
         const speed = carCtl.update(dt, input());
         hud.setSpeed(Math.abs(speed) * 3.6);
+        hud.setVehicle('SPORTS CAR', carDamage);
         rig.yaw += (carCtl.heading + Math.PI - rig.yaw) * 0; // keep drag orbit
         rig.follow(dt, heroCar, 'car', speed);
         // M1: reached the docks?
@@ -465,12 +531,15 @@ function frame() {
       gameMinutes += dt / 4;
       const total = 12 * 60 + Math.floor(gameMinutes);
       hud.setClock(String(Math.floor(total / 60) % 24).padStart(2, '0') + ':' + String(total % 60).padStart(2, '0'));
-      // minimap
+      // minimap + district + police response (response throttled)
       const tp = driving ? heroCar.position : hero.position;
       hud.player = { x: tp.x, z: tp.z, heading: driving ? carCtl.heading : hero.rotation.y };
       hud.police = police.map((p) => ({ x: p.mesh.position.x, z: p.mesh.position.z }));
       hud.enemies = enemies.filter((e) => e.alive).map((e) => ({ x: e.mesh.position.x, z: e.mesh.position.z }));
       hud.drawMinimap();
+      syncDistrict(tp.x, tp.z);
+      responseT += dt;
+      if (responseT > 0.3) { responseT = 0; syncResponse(); }
     }
     city.update(dt, t);
     // district label in the mission panel subtitle? keep HUD clean.

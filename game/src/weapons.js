@@ -1,5 +1,5 @@
 // SELAT BARA — weapon system (step 5).
-// Re-written in-session under recording 8 (gta6-01, 2026-11-24).
+// Re-written in-session under recording 9 (gta6-01, 2026-11-24).
 // Shoot (raycast vs targets), muzzle flash = glowing yellow box at the
 // gun tip, blood = small red (0xCC0000) box particles, car damage =
 // grey smoke puffs from the hood, shattered glass = pale shards. All
@@ -11,6 +11,9 @@
 // REBUILD FIX #5: Tracer — a bright yellow beam from the gun tip to the
 // target — plus a spark burst at the muzzle, so the bullet path is
 // visible in the action2/action3 frozen frames.
+// REBUILD #3 FIX #10: blood now also POOLS — a flat dark-red slab under
+// every fallen body — plus even bigger blood particles, so the red
+// actually reads in the wide shootout frame.
 import * as THREE from 'three';
 
 const unitBox = new THREE.BoxGeometry(1, 1, 1);
@@ -30,7 +33,7 @@ const TRACER_MAT = new THREE.MeshLambertMaterial({
 
 // --- particle pool: small boxes with velocity + life ----------------------
 export class Particles {
-  constructor(scene, max = 220) {
+  constructor(scene, max = 260) {
     this.scene = scene;
     this.pool = [];
     for (let i = 0; i < max; i++) {
@@ -64,9 +67,10 @@ export class Particles {
     this.spawn(pos, 0xcc0000, count, 3.2, 2.4, 0.7, 0.14);
   }
   // REBUILD FIX #3: bigger, chunkier blood — visible from across the street.
-  bloodBig(pos, count = 26) {
-    this.spawn(pos, 0xcc0000, count, 4.2, 3.0, 0.9, 0.22);
-    this.spawn(pos, 0x8f0000, Math.floor(count / 2), 2.4, 1.6, 1.1, 0.16);
+  // REBUILD #3 FIX #10: even bigger now (0.28) with more particles.
+  bloodBig(pos, count = 34) {
+    this.spawn(pos, 0xcc0000, count, 4.6, 3.2, 1.0, 0.28);
+    this.spawn(pos, 0x8f0000, Math.floor(count / 2), 2.6, 1.8, 1.2, 0.2);
   }
   smoke(pos, count = 10) {
     this.spawn(pos, 0x8a8a8a, count, 1.2, 2.6, 1.6, 0.3, -1.5); // rises
@@ -115,6 +119,21 @@ export class Particles {
       p.mesh.scale.setScalar(Math.max(0.02, p.mesh.scale.x * (0.4 + 0.6 * s)));
     }
   }
+}
+
+// --- blood pool: flat dark-red slab under a fallen body (FIX #10) ---------
+// A static mesh (not a particle) so the red stays put in the frozen
+// frame. Slight emissive so it reads even in shade.
+export function makeBloodPool(x, z, ry = 0) {
+  const m = new THREE.Mesh(
+    unitBox,
+    new THREE.MeshLambertMaterial({
+      color: 0x8f0000, emissive: 0x5a0000, emissiveIntensity: 0.55 }));
+  m.scale.set(1.9, 0.05, 1.1);
+  m.position.set(x, 0.14, z);
+  m.rotation.y = ry;
+  m.receiveShadow = true;
+  return m;
 }
 
 // --- muzzle flash: big glowing star at the gun tip ------------------------

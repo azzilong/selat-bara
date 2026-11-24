@@ -11,7 +11,7 @@ Play it offline in a desktop browser — no network, no build step.
 ## The story
 
 Raka is a courier who refused one delivery too many. Now the syndicate
-owns the streets of Selat Bara — and the Saltport PD owns Raka. Three jobs
+owns the streets of Selat Bara — and the Selat Bara PD owns Raka. Three jobs
 stand between him and the docks: outrun the pursuit, silence the gang,
 and lose the heat for good.
 
@@ -40,7 +40,8 @@ Open `game/index.html` in a desktop browser (or serve the `game/`
 folder with any static server). WASD to walk or drive, E to enter and
 exit the car, click to shoot, R to reload, drag the mouse to look
 around. The HUD shows the mission, wanted stars, health and armour,
-weapon and ammo, speed, and a live minimap.
+weapon and ammo, speed, and a live minimap — plus a named police
+response panel, district standing, and three weapon slots.
 
 For the staged action shots, open `game/index.html?scene=action1`,
 `?scene=action2`, `?scene=action3` or `?scene=title` — each loads a

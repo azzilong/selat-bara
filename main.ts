@@ -1,5 +1,5 @@
 // SELAT BARA — dossier build program (step 8).
-// Re-written in-session under recording 8 (gta6-01, 2026-11-24).
+// Re-written in-session under recording 9 (gta6-01, 2026-11-24).
 // Hands the game in: copies game/ and screenshots/ from beside this
 // file to /output (or $MAKEFUN_OUTPUT_DIR outside the grader) and
 // writes /output/dossier.json with buildDossier from the vendored
@@ -7,9 +7,9 @@
 // (text_max_bytes) — the hard limit for this bounty.
 //
 // Run it:  mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts
-// (Rebuild note: the dossier is rebuilt after every screenshot pass;
-//  the 6 rebuild fixes added ~3 KB of game code — still far under
-//  the 163,840-byte text cap.)
+// (Rebuild #3 note: the dossier is rebuilt after every screenshot
+//  pass; the HUD upgrade + blood pools + bigger drops added a few KB
+//  of game code — still far under the 163,840-byte text cap.)
 import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';

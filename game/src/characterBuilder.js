@@ -1,12 +1,12 @@
 // SELAT BARA — character builder (step 2).
-// Re-written in-session under recording 8 (gta6-01, 2026-11-24).
+// Re-written in-session under recording 9 (gta6-01, 2026-11-24).
 // Realistic proportions (brief): total height 1.8 units, head ~1/7 of
 // body (0.26), torso 0.55, legs 0.85, arms 0.6. Built from BoxGeometry
 // + CapsuleGeometry only, solid colours, no textures. Joints live in
 // userData so animateWalk / animateIdle can pose the character.
 // Walk = 4 frames (limb swing), idle = 2 frames (breathing sway).
-// REBUILD: buildDrop() added — floating loot above fallen enemies
-// (fix #6: cash bundle or ammo box + glow ring, bobbing in the shot).
+// REBUILD #3: drop rings are bigger and brighter (fix #9) so the loot
+// above fallen enemies reads from across the street.
 import * as THREE from 'three';
 
 const matCache = new Map();
@@ -140,7 +140,7 @@ export function buildEnemy() {
   return g;
 }
 
-// Saltport PD officer: navy uniform, police hat, SMG.
+// Selat Bara PD officer: navy uniform, police hat, SMG.
 export function buildPolice() {
   const g = buildCharacter({
     top: 0x2b3a55, pants: 0x1d2733, hat: 'police', gun: 'smg',
@@ -195,11 +195,13 @@ export function buildDrop(kind = 'cash') {
 }
 
 // Flat glowing ring that marks a drop's ground position.
+// REBUILD #3 FIX #9: bigger (0.8 radius) and brighter (emissive 2.0)
+// than the old 0.55 ring — the old one barely read at street distance.
 export function dropRing(color = 0x7dff8a) {
   const m = new THREE.Mesh(
-    new THREE.TorusGeometry(0.55, 0.06, 8, 24),
+    new THREE.TorusGeometry(0.8, 0.09, 8, 28),
     new THREE.MeshLambertMaterial({
-      color, emissive: color, emissiveIntensity: 1.4 }));
+      color, emissive: color, emissiveIntensity: 2.0 }));
   m.rotation.x = Math.PI / 2;
   m.position.y = 0.06;
   m.castShadow = false;

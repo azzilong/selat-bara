@@ -1,5 +1,5 @@
 // SELAT BARA — simple vehicle + on-foot physics (step 4).
-// Re-written in-session under recording 8 (gta6-01, 2026-11-24).
+// Re-written in-session under recording 9 (gta6-01, 2026-11-24).
 // Arcade car model on purpose: forward / reverse / steer, speed-based
 // steering, drag, and a hard clamp to the city bounds. No external
 // physics library (brief forbids it). On-foot controller walks the hero
