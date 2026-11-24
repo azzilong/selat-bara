@@ -1,445 +1,334 @@
-// Selat Bara — bootstrap, bright midday lighting, free-roam loop
-// (walk / drive / shoot, 3 missions, wanted + police pursuit + heli,
-// busted / respawn) and frozen "Mode Bioskop" scene mode (?scene=...).
+// main.js — Selat Bara bootstrap: renderer + mandated bright lighting,
+// city, free-roam (walk / drive / shoot, 3 missions, wanted + pursuit),
+// and the frozen ?scene= staging mode. No network while playing.
 import * as THREE from 'three';
-import { buildCity, districtAt } from './city.js';
-import { buildSportsCar, buildPoliceCar, buildHelicopter, flashLightBar, animateHeli, animateWheels } from './vehicleBuilder.js';
-import { buildHero, buildEnemy, buildDrop, poseFallen } from './characterBuilder.js';
+import { buildCity, districtAt, CITY_MIN, CITY_MAX } from './city.js';
+import { buildCharacter, setPose } from './characterBuilder.js';
+import { buildCar, buildHeli, flashLightBar, animateHeli, spinWheels } from './vehicleBuilder.js';
 import { CarController, FootController, CameraRig } from './physics.js';
-import { Particles, MuzzleFlash, Tracer, shoot } from './weapons.js';
-import { stageScene } from './scenes.js';
+import { ParticlePool, MuzzleFlash, Tracer, shoot } from './weapons.js';
 import { HUD } from './hud.js';
+import { stageScene, SCENE_HUD } from './scenes.js';
 
-document.title = 'SELAT BARA';
 const params = new URLSearchParams(location.search);
-const sceneName = params.get('scene');
-const SCENES = new Set(['action1', 'action2', 'action3', 'title', 'map']);
+const SCENE = params.get('scene') || '';
+const SCENES = ['action1', 'action2', 'action3', 'title', 'map'];
+const sceneMode = SCENES.includes(SCENE) ? SCENE : null;
 
-// --- renderer / scene / mandated bright lighting ---
+// --- renderer ---
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(innerWidth, innerHeight);
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
-document.getElementById('scene').appendChild(renderer.domElement);
+document.getElementById('app').appendChild(renderer.domElement);
 
+// --- scene + mandated bright midday lighting ---
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x87CEEB);
-scene.fog = new THREE.Fog(0x87CEEB, 60, 200);
-const camera = new THREE.PerspectiveCamera(60, innerWidth / innerHeight, 0.1, 500);
-
-scene.add(new THREE.HemisphereLight(0x87CEEB, 0xE0C090, 0.8));
-const sun = new THREE.DirectionalLight(0xFFF8E7, 1.5);
-sun.position.set(40, 60, 20);
+scene.background = new THREE.Color(0x87ceeb);
+scene.fog = new THREE.Fog(0x87ceeb, 60, 200);
+const camera = new THREE.PerspectiveCamera(62, innerWidth / innerHeight, 0.1, 400);
+camera.position.set(6, 4, 26);
+const hemi = new THREE.HemisphereLight(0x87ceeb, 0xe0c090, 0.8);
+scene.add(hemi);
+const sun = new THREE.DirectionalLight(0xfff8e7, 1.5);
 sun.castShadow = true;
+sun.position.set(40, 60, 20);
 sun.shadow.mapSize.set(2048, 2048);
 sun.shadow.camera.left = -100; sun.shadow.camera.right = 100;
 sun.shadow.camera.top = 100; sun.shadow.camera.bottom = -100;
-sun.shadow.camera.far = 220;
+sun.shadow.camera.far = 200;
 scene.add(sun);
 
+// --- world ---
 const city = buildCity(scene);
-const particles = new Particles(scene);
-const flash = new MuzzleFlash(scene);
-const tracer = new Tracer(scene);
+const pool = new ParticlePool(scene);
 const hud = new HUD();
-const rig = new CameraRig(camera);
 
-// --- player: hero on foot + his sports car ---
-const hero = buildHero();
-hero.position.set(2, 0, 18);
+// --- hero + hero car (free-roam) ---
+const hero = buildCharacter({ role: 'hero' });
+hero.position.set(0, 0, 14);
 scene.add(hero);
-const heroCar = buildSportsCar(0xd42a1e);
-heroCar.position.set(0, 0, 20);
+const heroCar = buildCar({ kind: 'sports', color: 0xd21f2b });
+heroCar.position.set(0, 0, 10);
 scene.add(heroCar);
 const carCtl = new CarController(heroCar);
 const footCtl = new FootController(hero);
+const rig = new CameraRig(camera);
 
 // --- game state ---
 const state = {
-  started: false, inCar: false, busted: false, bustedTimer: 0,
-  health: 100, armour: 60, money: 250, wanted: 0, clockMin: 12 * 60,
-  mag: 30, reserve: 90, weapon: 'SMG', stage: 1, lastDamage: -99,
-  missionTarget: new THREE.Vector3(-88, 0, 40),
+  started: false,
+  driving: false,
+  money: 250,
+  health: 100,
+  armour: 100,
+  wanted: 0,
+  mission: 1,
+  ammo: { pistol: [12, 36], smg: [30, 90] },
+  weapon: 2, // 0 fists, 1 pistol, 2 smg
+  clockMin: 12 * 60,
+  enemies: [],
+  police: [],
+  heli: null,
+  busted: false,
+  missionMarker: null,
 };
-const input = { forward: false, back: false, left: false, right: false };
+const MISSION_TARGETS = [
+  { name: 'M1 · THE GETAWAY', stage: 'STAGE 1/3 · STEAL THE CAR', objective: 'Reach the docks', next: 'NEXT Lose the heli', progress: 0.3, target: { x: -88, z: 40 } },
+  { name: 'M2 · THE BRUTAL SHOOTOUT', stage: 'STAGE 2/3 · CLEAR THE STREET', objective: 'Kill the Gang', next: 'NEXT Vanish', progress: 0.55, target: { x: 0, z: 4 } },
+  { name: 'M3 · HIGH SPEED CHASE', stage: 'STAGE 3/3 · LOSE THE HEAT', objective: 'Reach the docks', next: 'NEXT Reach the docks', progress: 0.8, target: { x: -88, z: 40 } },
+];
+function missionBeam(target) {
+  if (state.missionMarker) scene.remove(state.missionMarker);
+  const geo = new THREE.CylinderGeometry(0.5, 0.5, 40, 10, 1, true);
+  const mat = new THREE.MeshBasicMaterial({ color: 0xffc23a, transparent: true, opacity: 0.18, side: THREE.DoubleSide, depthWrite: false });
+  const beam = new THREE.Mesh(geo, mat);
+  beam.position.set(target.x, 20, target.z);
+  scene.add(beam);
+  state.missionMarker = beam;
+}
+function applyMission(i) {
+  const m = MISSION_TARGETS[i];
+  state.mission = i + 1;
+  hud.setMission(m);
+  hud.routeTarget = { x: m.target.x, z: m.target.z, label: 'Dermaga Bara' };
+  missionBeam(m.target);
+}
+function spawnEnemies(n) {
+  for (const e of state.enemies) scene.remove(e);
+  state.enemies = [];
+  for (let k = 0; k < n; k++) {
+    const e = buildCharacter({ role: 'enemy', shirt: 0x3a3f4a, pants: 0x2c313a });
+    e.position.set(-6 + k * 4, 0, 2 + (k % 2) * 3);
+    e.rotation.y = 0;
+    scene.add(e);
+    state.enemies.push(e);
+  }
+}
+function spawnPolice(n) {
+  for (const p of state.police) scene.remove(p.mesh);
+  state.police = [];
+  const names = [['SBPD-7 BARA', 'SBPD-7', 'IN PURSUIT'], ['SBPD-12 TANJUNG', 'SBPD-12', 'RAMMING'], ['SBPD-19 KACA', 'SBPD-19', 'IN PURSUIT']];
+  for (let k = 0; k < n; k++) {
+    const mesh = buildCar({ kind: 'police' });
+    mesh.position.set(10 + k * 8, 0, 30 + k * 4);
+    scene.add(mesh);
+    state.police.push({ mesh, name: names[k % 3][0], short: names[k % 3][1], role: names[k % 3][2], x: mesh.position.x, z: mesh.position.z });
+  }
+  if (n >= 3 && !state.heli) {
+    state.heli = buildHeli();
+    state.heli.position.set(0, 26, -10);
+    scene.add(state.heli);
+    state.police.push({ mesh: state.heli, name: 'SBPD-AIR ELANG', short: 'SBPD-AIR', role: 'AIR UNIT', x: 0, z: -10 });
+  }
+}
+function raiseWanted(n) {
+  state.wanted = Math.max(state.wanted, n);
+  hud.setWanted(state.wanted);
+  spawnPolice(state.wanted >= 3 ? 3 : state.wanted);
+  hud.setPD(state.police);
+}
+
+// --- input ---
 const keys = {};
 addEventListener('keydown', (e) => {
-  keys[e.code] = true;
-  if (e.code === 'Enter' && !state.started && !sceneName) startGame();
-  if (e.code === 'KeyE') toggleCar();
-  if (e.code === 'KeyR') reload();
-  if (e.code === 'Space') tryShoot();
-  if (e.code === 'Digit1') selectWeapon(1);
-  if (e.code === 'Digit3') selectWeapon(3);
+  keys[e.key.toLowerCase()] = true;
+  if (e.key === 'Enter' && !state.started && !sceneMode) startGame();
+  if (e.key.toLowerCase() === 'e' && state.started && !sceneMode) toggleCar();
+  if (e.key.toLowerCase() === 'r' && state.started) reload();
+  if (['1', '2', '3'].includes(e.key)) selectWeapon(Number(e.key) - 1);
+  if (e.key === ' ') { e.preventDefault(); if (state.started) fireWeapon(); }
 });
-addEventListener('keyup', (e) => { keys[e.code] = false; });
-addEventListener('mousedown', () => { if (state.started) tryShoot(); });
+addEventListener('keyup', (e) => { keys[e.key.toLowerCase()] = false; });
+addEventListener('mousedown', () => { if (state.started && !sceneMode) fireWeapon(); });
+
+function readInput() {
+  return {
+    forward: !!(keys['w'] || keys['arrowup']),
+    back: !!(keys['s'] || keys['arrowdown']),
+    left: !!(keys['a'] || keys['arrowleft']),
+    right: !!(keys['d'] || keys['arrowright']),
+  };
+}
+function toggleCar() {
+  state.driving = !state.driving;
+  hero.visible = !state.driving;
+  if (state.driving) {
+    carCtl.pos.copy(hero.position);
+    carCtl.heading = footCtl.heading;
+  } else {
+    footCtl.pos.copy(carCtl.pos);
+    footCtl.pos.z += 3;
+  }
+}
+function selectWeapon(i) {
+  state.weapon = i;
+  syncWeaponHUD();
+}
+function reload() {
+  const w = state.weapon === 1 ? 'pistol' : state.weapon === 2 ? 'smg' : null;
+  if (!w) return;
+  const [mag, reserve] = state.ammo[w];
+  const need = (w === 'smg' ? 30 : 12) - mag;
+  const take = Math.min(need, reserve);
+  state.ammo[w] = [mag + take, reserve - take];
+  syncWeaponHUD();
+}
+function syncWeaponHUD() {
+  const slots = [
+    { name: 'FISTS', owned: true, ammo: '∞' },
+    { name: 'PISTOL', owned: true, ammo: `${state.ammo.pistol[0]}/${state.ammo.pistol[1]}` },
+    { name: 'SMG', owned: true, ammo: `${state.ammo.smg[0]}/${state.ammo.smg[1]}` },
+  ];
+  hud.setWeapon(slots, state.weapon);
+}
+function fireWeapon() {
+  if (state.weapon === 0) return;
+  const w = state.weapon === 1 ? 'pistol' : 'smg';
+  if (state.ammo[w][0] <= 0) { reload(); return; }
+  state.ammo[w][0]--;
+  syncWeaponHUD();
+  raiseWanted(1);
+  shoot(scene, camera, pool, freeFlash, freeTracer, state.enemies, () => {
+    raiseWanted(2);
+  });
+}
+function startGame() {
+  state.started = true;
+  hud.showTitle(false);
+  hud.showHUD(true);
+  hud.showHint(true);
+  applyMission(0);
+  hud.setMoney(state.money);
+  hud.setHealth(state.health, state.armour);
+  hud.setClock('12:00');
+  syncWeaponHUD();
+  hud.setDistrict(districtAt(hero.position.x, hero.position.z));
+}
+function bust() {
+  state.busted = true;
+  state.health = 100; state.armour = 0; state.wanted = 0;
+  state.money = Math.max(0, state.money - 100);
+  hud.showBusted(true);
+  setTimeout(() => {
+    hud.showBusted(false);
+    hero.position.set(0, 0, 14);
+    footCtl.pos.set(0, 0, 14);
+    state.busted = false;
+    state.wanted = 0;
+    hud.setWanted(0);
+    hud.setHealth(100, 0);
+    hud.setMoney(state.money);
+  }, 2500);
+}
+
+// shared flash + tracer for free-roam shooting
+const freeFlash = new MuzzleFlash(scene);
+const freeTracer = new Tracer(scene);
+
+// --- staged scene mode ---
+let staged = null;
+if (sceneMode) {
+  hud.showHUD(true);
+  hud.showTitle(false);
+  hero.visible = false;
+  heroCar.visible = false;
+  staged = stageScene(sceneMode, scene, hud, pool, camera);
+  // hide the free-roam hero + car so no stray slab blocks the frame
+  hero.position.set(0, -50, 0);
+  heroCar.position.set(0, -50, 0);
+} else {
+  hud.showHUD(false);
+  hud.showTitle(true);
+  hud.setClock('12:00');
+  hud.setMoney(state.money);
+}
+
+// --- main loop ---
+const clock = new THREE.Clock();
+let frames = 0;
+function loop() {
+  requestAnimationFrame(loop);
+  const dt = Math.min(clock.getDelta(), 0.05);
+  frames++;
+  city.update(dt);
+  if (sceneMode) {
+    if (staged) staged.update(dt);
+    hud.tick();
+  } else if (state.started && !state.busted) {
+    const input = readInput();
+    let speed = 0;
+    if (state.driving) {
+      speed = carCtl.update(dt, input);
+      spinWheels(heroCar, carCtl.speed, dt);
+      rig.followCar(carCtl.pos, carCtl.heading, speed, dt);
+      hud.setSpeed(Math.abs(carCtl.speed) * 3.6, 'SPORTS CAR', 12);
+    } else {
+      const walking = footCtl.update(dt, input, rig.camera.rotation.y);
+      setPose(hero, walking ? 'walk' : 'idle', footCtl.walkPhase);
+      rig.followFoot(footCtl.pos, footCtl.heading, dt);
+      hud.setSpeed(null);
+    }
+    // clock advances slowly in free roam (stays midday)
+    state.clockMin += dt * 0.2;
+    const hh = Math.floor(state.clockMin / 60) % 24;
+    const mm = Math.floor(state.clockMin % 60);
+    hud.setClock(`${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`);
+    // district + standing follows the player
+    const d = districtAt(state.driving ? carCtl.pos.x : footCtl.pos.x, state.driving ? carCtl.pos.z : footCtl.pos.z);
+    if (d.key !== hud.district.key) hud.setDistrict(d);
+    hud.player = state.driving ? { x: carCtl.pos.x, z: carCtl.pos.z } : { x: footCtl.pos.x, z: footCtl.pos.z };
+    // police pursuit: chase the player, flash bars, heli follows
+    for (const p of state.police) {
+      if (p.mesh === state.heli) continue;
+      const dx = hud.player.x - p.mesh.position.x;
+      const dz = hud.player.z - p.mesh.position.z;
+      const dist = Math.hypot(dx, dz) || 1;
+      const sp = 11 * dt;
+      p.mesh.position.x += (dx / dist) * sp;
+      p.mesh.position.z += (dz / dist) * sp;
+      p.mesh.rotation.y = Math.atan2(dx, dz);
+      p.x = p.mesh.position.x; p.z = p.mesh.position.z;
+      flashLightBar(p.mesh, dt);
+    }
+    if (state.heli) {
+      animateHeli(state.heli, dt);
+      state.heli.position.x += (hud.player.x - state.heli.position.x) * 0.3 * dt;
+      state.heli.position.z += (hud.player.z - state.heli.position.z) * 0.3 * dt;
+      state.heli.position.y = 26 + Math.sin(frames * 0.02) * 1.5;
+    }
+    // mission progress: reaching the target advances the mission
+    const m = MISSION_TARGETS[state.mission - 1];
+    if (m && Math.hypot(hud.player.x - m.target.x, hud.player.z - m.target.z) < 6) {
+      if (state.mission === 1) { spawnEnemies(4); applyMission(1); raiseWanted(2); }
+      else if (state.mission === 2 && state.enemies.length === 0) { applyMission(2); raiseWanted(3); }
+      else if (state.mission === 3) { state.money += 500; hud.setMoney(state.money); applyMission(0); }
+    }
+    // enemies shoot back a little when close
+    for (const e of state.enemies) {
+      const dist = Math.hypot(e.position.x - hud.player.x, e.position.z - hud.player.z);
+      if (dist < 25 && Math.random() < dt * 0.3) {
+        state.health -= 2;
+        hud.setHealth(state.health, state.armour);
+        if (state.health <= 0) bust();
+      }
+    }
+    hud.tick();
+    pool.update(dt);
+  } else {
+    // title screen: slow street-level dolly past the hero car
+    const t = frames * 0.0016;
+    camera.position.set(Math.sin(t) * 8 + 4, 3.2, 26 + Math.cos(t * 0.7) * 3);
+    camera.lookAt(0, 1.4, 4);
+  }
+  renderer.render(scene, camera);
+  if (frames === 3) window.__ready = true;
+}
 addEventListener('resize', () => {
   camera.aspect = innerWidth / innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(innerWidth, innerHeight);
 });
-
-function readInput() {
-  input.forward = !!(keys.KeyW || keys.ArrowUp);
-  input.back = !!(keys.KeyS || keys.ArrowDown);
-  input.left = !!(keys.KeyA || keys.ArrowLeft);
-  input.right = !!(keys.KeyD || keys.ArrowRight);
-}
-
-function startGame() {
-  state.started = true;
-  document.getElementById('title-overlay').style.display = 'none';
-  document.getElementById('hud').style.display = 'block';
-  hud.setHintVisible(true);
-  setStage(1);
-}
-
-function toggleCar() {
-  if (!state.started || state.busted) return;
-  if (!state.inCar) {
-    if (hero.position.distanceTo(heroCar.position) < 4) {
-      state.inCar = true;
-      hero.visible = false;
-      if (state.stage === 1) setStage(2);
-    }
-  } else {
-    state.inCar = false;
-    hero.visible = true;
-    hero.position.copy(heroCar.position).add(new THREE.Vector3(2.2, 0, 0));
-    hero.rotation.y = heroCar.rotation.y;
-  }
-}
-
-function reload() {
-  if (state.weapon !== 'SMG' || state.mag === 30 || state.reserve === 0) return;
-  const need = 30 - state.mag;
-  const take = Math.min(need, state.reserve);
-  state.mag += take; state.reserve -= take;
-  hud.setAmmo('SMG', state.mag, state.reserve);
-}
-
-function selectWeapon(n) {
-  if (n === 1) { state.weapon = 'FISTS'; hud.setAmmo('FISTS', '∞', ''); }
-  if (n === 3) { state.weapon = 'SMG'; hud.setAmmo('SMG', state.mag, state.reserve); }
-  hud.setWeaponSlots([
-    { n: 1, name: 'FISTS', ammo: '∞', owned: true, selected: state.weapon === 'FISTS' },
-    { n: 2, name: 'PISTOL', ammo: '—', owned: false, selected: false },
-    { n: 3, name: 'SMG', ammo: state.mag + '/' + state.reserve, owned: true, selected: state.weapon === 'SMG' },
-  ]);
-}
-
-// --- missions ---
-const marker = new THREE.Mesh(
-  new THREE.CylinderGeometry(1.4, 1.4, 30, 16, 1, true),
-  new THREE.MeshLambertMaterial({ color: 0xffc81a, transparent: true, opacity: 0.18, side: THREE.DoubleSide }),
-);
-marker.position.copy(state.missionTarget);
-scene.add(marker);
-
-const enemies = [];
-function spawnGang() {
-  const spots = [[-6, -24], [-2, -26], [3, -24], [7, -27]];
-  for (const [x, z] of spots) {
-    const e = buildEnemy();
-    e.position.set(x, 0, z);
-    e.rotation.y = Math.PI;
-    e.userData.hp = 100;
-    e.userData.shootTimer = 1 + Math.random();
-    scene.add(e);
-    enemies.push(e);
-  }
-  hud.setMission('M2 · THE BRUTAL SHOOTOUT', 'STAGE 2/3 · CLEAR THE STREET', 'Kill the gang', 'Vanish', 0.5);
-}
-
-function setStage(n) {
-  state.stage = n;
-  if (n === 1) {
-    hud.setMission('M1 · THE GETAWAY', 'STAGE 1/3 · STEAL THE CAR', 'Steal the sports car', 'Lose the heli', 0.1);
-    state.missionTarget.set(0, 0, 20);
-  } else if (n === 2) {
-    hud.setMission('M1 · THE GETAWAY', 'STAGE 1/3 · STEAL THE CAR', 'Reach the docks', 'Lose the heli', 0.4);
-    state.missionTarget.set(-88, 0, 40);
-  } else if (n === 3) {
-    spawnGang();
-    state.missionTarget.set(0, 0, -25);
-  }
-  marker.position.copy(state.missionTarget);
-  hud.routeTarget.copy(state.missionTarget);
-}
-
-// --- shooting ---
-let shootCooldown = 0;
-function tryShoot() {
-  if (!state.started || state.busted || state.weapon !== 'SMG') return;
-  if (shootCooldown > 0 || state.mag <= 0) { if (state.mag <= 0) reload(); return; }
-  shootCooldown = 0.14;
-  state.mag--;
-  hud.setAmmo('SMG', state.mag, state.reserve);
-  const origin = state.inCar
-    ? heroCar.position.clone().add(new THREE.Vector3(0, 1.3, 0))
-    : hero.position.clone().add(new THREE.Vector3(0, 1.35, 0));
-  const dir = new THREE.Vector3();
-  camera.getWorldDirection(dir);
-  const targets = [...enemies, ...policeCars.map((p) => p.obj)];
-  const hit = shoot(origin, dir, targets, 70);
-  const muzzle = origin.clone().addScaledVector(dir, 0.8);
-  flash.show(muzzle, dir);
-  particles.sparks(muzzle);
-  if (hit) {
-    tracer.fire(muzzle, hit.point);
-    if (hit.target && hit.target.userData.kind === 'enemy') {
-      particles.blood(hit.point, true);
-      hit.target.userData.hp -= 34;
-      if (hit.target.userData.hp <= 0 && hit.target.userData.kind === 'enemy') {
-        killEnemy(hit.target);
-      }
-    } else {
-      raiseWanted(1);
-    }
-  } else {
-    tracer.fire(muzzle, origin.clone().addScaledVector(dir, 50));
-  }
-}
-
-function killEnemy(e) {
-  poseFallen(e);
-  e.userData.dead = true;
-  particles.blood(e.position.clone().setY(0.5), true);
-  const drop = buildDrop(Math.random() < 0.5 ? 'cash' : 'ammo');
-  drop.position.set(e.position.x, 1.3, e.position.z);
-  scene.add(drop);
-  drops.push(drop);
-  state.money += 50;
-  hud.setMoney(state.money);
-  if (enemies.every((x) => x.userData.dead)) {
-    hud.setMission('M2 · THE BRUTAL SHOOTOUT', 'STAGE 2/3 · CLEAR THE STREET', 'Street cleared!', 'Vanish', 1);
-    state.money += 500;
-    hud.setMoney(state.money);
-    document.getElementById('mission-done').style.display = 'block';
-    setTimeout(() => { document.getElementById('mission-done').style.display = 'none'; }, 4000);
-    setWanted(0);
-  }
-}
-
-// --- wanted / police pursuit ---
-const policeCars = [];
-const drops = [];
-let heli = null;
-function raiseWanted(n) {
-  setWanted(Math.min(5, state.wanted + n));
-}
-function setWanted(n) {
-  state.wanted = n;
-  hud.setWanted(n, n >= 3 ? 'AIR UNIT DEPLOYED' : n >= 2 ? 'UNITS RESPONDING' : n >= 1 ? 'PATROL ALERTED' : '');
-  syncPolice();
-}
-function syncPolice() {
-  const want = Math.min(state.wanted, 3);
-  while (policeCars.length < want) {
-    const p = buildPoliceCar();
-    const a = Math.random() * Math.PI * 2;
-    p.position.set(heroCar.position.x + Math.sin(a) * 40, 0, heroCar.position.z + Math.cos(a) * 40);
-    scene.add(p);
-    policeCars.push({ obj: p, speed: 14 + Math.random() * 4 });
-  }
-  while (policeCars.length > want) {
-    const p = policeCars.pop();
-    scene.remove(p.obj);
-  }
-  if (state.wanted >= 3 && !heli) {
-    heli = buildHelicopter();
-    heli.position.set(heroCar.position.x + 10, 14, heroCar.position.z + 10);
-    scene.add(heli);
-  } else if (state.wanted < 3 && heli) {
-    scene.remove(heli);
-    heli = null;
-  }
-  const names = ['SBPD-7 BARA', 'SBPD-12 TANJUNG', 'SBPD-19 KACA', 'SBPD-AIR ELANG'];
-  const roles = ['IN PURSUIT', 'IN PURSUIT', 'RAMMING', 'AIR UNIT'];
-  const units = policeCars.map((p, i) => ({ name: names[i % 3], role: roles[i % 3], obj: p.obj }));
-  if (heli) units.push({ name: 'SBPD-AIR ELANG', role: 'AIR UNIT', obj: heli });
-  hud.setPolice(units, state.wanted > 0 ? 'CONTROL: ' + state.wanted + '★ — units responding' : '');
-}
-
-function damagePlayer(amount) {
-  const now = performance.now() / 1000;
-  state.lastDamage = now;
-  let left = amount;
-  if (state.armour > 0) {
-    const absorbed = Math.min(state.armour, left * 0.6);
-    state.armour -= absorbed;
-    left -= absorbed;
-  }
-  state.health -= left;
-  hud.setHealth(Math.max(0, state.health));
-  hud.setArmour(Math.max(0, state.armour));
-  if (state.health <= 0 && !state.busted) {
-    state.busted = true;
-    state.bustedTimer = 0;
-    document.getElementById('busted-overlay').style.display = 'flex';
-    setWanted(0);
-  }
-}
-
-function respawn() {
-  state.busted = false;
-  state.health = 100; state.armour = 60;
-  hud.setHealth(100); hud.setArmour(60);
-  document.getElementById('busted-overlay').style.display = 'none';
-  hero.position.set(0, 0, 30);
-  heroCar.position.set(2, 0, 32);
-  carCtl.heading = 0; carCtl.speed = 0;
-  state.inCar = false;
-  hero.visible = true;
-}
-
-// --- scene mode (frozen Mode Bioskop) ---
-let sceneUpdate = null;
-let stagedPolice = [];
-let stagedPlayerPos = new THREE.Vector3(0, 0, 12);
-if (sceneName && SCENES.has(sceneName)) {
-  document.getElementById('title-overlay').style.display = 'none';
-  hero.visible = false;
-  heroCar.visible = false;
-  marker.visible = false;
-  const staged = stageScene(sceneName, { scene, camera, rig, particles, flash, tracer });
-  sceneUpdate = staged.update;
-  stagedPolice = staged.police;
-  stagedPlayerPos = staged.playerPos;
-  if (staged.routeTarget) hud.routeTarget.copy(staged.routeTarget);
-  hud.setMapMode(sceneName === 'map');
-  state.started = true;
-  if (sceneName === 'title') {
-    document.getElementById('title-overlay').style.display = 'flex';
-    hud.applyScene(staged.hud);
-    document.getElementById('hud').style.display = 'none';
-  } else {
-    hud.applyScene(staged.hud);
-    hud.setPolice(staged.police, staged.hud.control);
-  }
-} else {
-  hud.applyScene({
-    mission: 'M1 · THE GETAWAY', stage: 'STAGE 1/3 · STEAL THE CAR',
-    objective: 'Steal the sports car', next: 'Lose the heli', progress: 0.1,
-    wanted: 0, money: 250, clock: '12:00', weapon: 'SMG', mag: 30, reserve: 90,
-    health: 100, armour: 60, speed: null,
-    district: 'PELABUHAN BARA', street: 'Dermaga Bara', standing: 'NEUTRAL', standingVal: 58,
-  });
-  hud.setPolice([], '');
-  hud.setHintVisible(false);
-  document.getElementById('hud').style.display = 'none';
-  selectWeapon(3);
-}
-
-// --- main loop ---
-const clock = new THREE.Clock();
-let firstFrame = true;
-let enemyShootAcc = 0;
-
-function animate() {
-  requestAnimationFrame(animate);
-  const dt = Math.min(clock.getDelta(), 0.05);
-  const t = clock.elapsedTime;
-  city.update(dt, t);
-  particles.update(dt);
-  flash.update(dt);
-  tracer.update(dt);
-  shootCooldown = Math.max(0, shootCooldown - dt);
-
-  if (sceneUpdate) {
-    sceneUpdate(dt, t);
-    hud.tick(dt, stagedPlayerPos, []);
-  } else if (state.started && !state.busted) {
-    readInput();
-    // clock advances 1 game-hour per 5 real minutes
-    state.clockMin += dt * 0.2;
-    const hh = Math.floor(state.clockMin / 60) % 24;
-    const mm = Math.floor(state.clockMin % 60);
-    hud.setClock(String(hh).padStart(2, '0') + ':' + String(mm).padStart(2, '0'));
-    if (state.inCar) {
-      const sp = carCtl.update(dt, input);
-      animateWheels(heroCar, sp, dt);
-      rig.update(dt, heroCar, 'car', carCtl.kmh);
-      hud.setSpeed(carCtl.kmh, "RAKA'S SPORTS CAR", '12% DENTED');
-    } else {
-      footCtl.update(dt, input, hero.rotation.y);
-      rig.update(dt, hero, 'foot');
-      hud.setSpeed(null);
-    }
-    const pp = state.inCar ? heroCar.position : hero.position;
-    // district + standing under the minimap
-    const d = districtAt(pp.x, pp.z);
-    hud.setDistrict(d.name, d.street, 'NEUTRAL', 58);
-    // mission triggers
-    if (state.stage === 2 && pp.distanceTo(state.missionTarget) < 9) setStage(3);
-    // police pursuit + ramming
-    const target = state.inCar ? heroCar : hero;
-    for (const p of policeCars) {
-      flashLightBar(p.obj, t);
-      const to = target.position.clone().sub(p.obj.position);
-      const dist = to.length();
-      const desired = Math.atan2(-to.x, -to.z);
-      let dy = desired - p.obj.rotation.y;
-      while (dy > Math.PI) dy -= Math.PI * 2;
-      while (dy < -Math.PI) dy += Math.PI * 2;
-      p.obj.rotation.y += THREE.MathUtils.clamp(dy, -1.6 * dt, 1.6 * dt);
-      if (dist > 3) {
-        p.obj.position.addScaledVector(to.normalize(), p.speed * dt);
-        animateWheels(p.obj, p.speed, dt);
-      } else if (Math.random() < dt * 0.5) {
-        damagePlayer(6);
-      }
-    }
-    if (heli) {
-      animateHeli(heli, dt, t);
-      const a = t * 0.25;
-      heli.position.x = target.position.x + Math.sin(a) * 16;
-      heli.position.z = target.position.z + Math.cos(a) * 16;
-      heli.position.y = 14;
-    }
-    // gang return fire
-    enemyShootAcc += dt;
-    if (enemyShootAcc > 1.4) {
-      enemyShootAcc = 0;
-      for (const e of enemies) {
-        if (e.userData.dead) continue;
-        if (e.position.distanceTo(pp) < 45 && Math.random() < 0.35) {
-          damagePlayer(6);
-          const m = e.position.clone().setY(1.3);
-          flash.show(m, pp.clone().setY(1.2).sub(m).normalize());
-        }
-      }
-    }
-    // health regen after 5s without damage
-    if (performance.now() / 1000 - state.lastDamage > 5 && state.health > 0 && state.health < 100) {
-      state.health = Math.min(100, state.health + 2 * dt);
-      hud.setHealth(state.health);
-    }
-    // drops bob + billboard
-    for (const d of drops) {
-      d.position.y = d.userData.baseY + Math.sin(t * 2 + d.position.x) * 0.08;
-      d.rotation.y = Math.atan2(camera.position.x - d.position.x, camera.position.z - d.position.z);
-    }
-    hud.tick(dt, pp, enemies.filter((e) => !e.userData.dead));
-  } else if (state.busted) {
-    state.bustedTimer += dt;
-    if (state.bustedTimer > 3) respawn();
-  } else {
-    // title screen idle: slow street-level dolly down the avenue
-    const a = t * 0.05;
-    camera.position.set(Math.sin(a) * 8, 3.2, 32);
-    camera.lookAt(0, 2.5, -10);
-    hud.tick(dt, hero.position, []);
-  }
-
-  renderer.render(scene, camera);
-  if (firstFrame) {
-    firstFrame = false;
-    window.__ready = true;
-    window.__game = { scene, camera, state, hud };
-  }
-}
-animate();
+loop();

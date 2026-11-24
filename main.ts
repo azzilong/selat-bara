@@ -1,32 +1,36 @@
-// Selat Bara — dossier build program (node 22, no network).
-// Copies game/ + screenshots/ into $MAKEFUN_OUTPUT_DIR, then builds the
-// dossier with the vendored make.fun game library and writes dossier.json.
-// Usage: MAKEFUN_OUTPUT_DIR=out node main.ts
-import { cpSync, existsSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+// main.ts — Selat Bara dossier build for make.fun (gta6-01).
+// Copies game/ + screenshots/ into $MAKEFUN_OUTPUT_DIR, builds the dossier
+// with the kit's buildDossier, writes dossier.json, and reports the text
+// size against the 163,840-byte HARD limit. Run: MAKEFUN_OUTPUT_DIR=out node main.ts
+import { writeFileSync, rmSync, cpSync, mkdirSync } from 'node:fs';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { buildDossier } from './vendor/makefun-game.ts';
 
-const repoRoot = resolve(import.meta.dirname);
-const outDir = resolve(process.env.MAKEFUN_OUTPUT_DIR || 'out');
+const root = dirname(fileURLToPath(import.meta.url));
+const out = process.env.MAKEFUN_OUTPUT_DIR || join(root, 'out');
 
-mkdirSync(outDir, { recursive: true });
-for (const name of ['game', 'screenshots']) {
-  const src = join(repoRoot, name);
-  if (!existsSync(src)) throw new Error(`missing ${name}/ in ${repoRoot}`);
-  cpSync(src, join(outDir, name), { recursive: true, force: true });
-}
+// Fresh output every run: stale files (e.g. a retired screenshot) must never
+// be counted, so the whole output dir is removed before copying.
+rmSync(out, { recursive: true, force: true });
+mkdirSync(out, { recursive: true });
+cpSync(join(root, 'game'), join(out, 'game'), { recursive: true });
+cpSync(join(root, 'screenshots'), join(out, 'screenshots'), { recursive: true });
 
-const dossier = buildDossier(outDir, {
+const bytes = buildDossier(out, {
   text_max_bytes: 163840,
   screenshots: { max: 4, max_bytes: 262144 },
-  game_max_files: 993,
-  game_max_bytes: 50331648,
 });
-const text = Buffer.from(dossier).toString('utf8');
-const parsed = JSON.parse(text);
-const gameText = Buffer.byteLength(parsed.text, 'utf8');
-const cut = parsed.text.includes('[Cut at');
-writeFileSync(join(outDir, 'dossier.json'), dossier);
-console.log(`dossier text ${gameText} / 163840 bytes — ${gameText <= 163840 ? 'FITS' : 'OVER LIMIT'}${cut ? ' — WARNING: sources were CUT to fit!' : ' (all sources included)'}`);
-console.log(`screenshots: ${parsed.images.length}, dossier.json: ${dossier.length} bytes`);
-console.log('entries in out/:', readdirSync(outDir).join(', '));
+writeFileSync(join(out, 'dossier.json'), bytes);
+
+const parsed = JSON.parse(Buffer.from(bytes).toString('utf8'));
+const text = typeof parsed.text === 'string' ? parsed.text : '';
+const textBytes = Buffer.byteLength(text, 'utf8');
+const cut = text.includes('[Cut at');
+const images = Array.isArray(parsed.images) ? parsed.images.length : 0;
+console.log(`dossier text ${textBytes} / 163840 bytes — ${textBytes <= 163840 && !cut ? 'FITS' : 'OVER LIMIT'}${cut ? ' (TRUNCATED)' : ''}`);
+console.log(`screenshots: ${images}, dossier.json: ${bytes.length} bytes`);
+if (cut || textBytes > 163840) {
+  console.error('dossier text exceeds the limit or was cut — shrink the sources');
+  process.exitCode = 1;
+}

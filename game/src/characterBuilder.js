@@ -1,150 +1,181 @@
-// Selat Bara — character builders + drops.
-// Realistic proportions: 1.8u tall, head 0.26u (1/7 of height). All boxes,
-// MeshLambertMaterial only, no textures. Characters face -Z by default.
+// characterBuilder.js — Selat Bara characters (realistic 1.8u proportions,
+// head ~1/7 of body) + pickups. All Box/Cylinder geometry, Lambert, no textures.
 import * as THREE from 'three';
 
-const M = (c) => new THREE.MeshLambertMaterial({ color: c });
-const L = (c, e = 1) => new THREE.MeshLambertMaterial({ color: c, emissive: c, emissiveIntensity: e });
-
-function box(w, h, d, c, x = 0, y = 0, z = 0, mat = null) {
-  const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat || M(c));
+function lam(color, emissive = 0x000000, ei = 1) {
+  return new THREE.MeshLambertMaterial({ color, emissive, emissiveIntensity: ei });
+}
+function part(w, h, d, mat, x, y, z) {
+  const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
   m.position.set(x, y, z);
   m.castShadow = true;
   return m;
 }
 
-// Shared skeleton: legs 0.8, torso 0.6, head 0.26, arms at the sides.
-// Returns { group, head, torso, armL, armR, legL, legR, gun }.
-function buildBody({ skin = 0xd9a066, shirt = 0xcccccc, pants = 0x2a3550, jacket = null, hat = null }) {
+// Roles: 'hero' (ember-red jacket + SMG), 'enemy' (rifle + orange band),
+// 'police' (navy uniform + cap), 'pedestrian' (plain clothes).
+export function buildCharacter(opts = {}) {
+  const {
+    skin = 0xc68e5e, shirt = 0xd21f2b, pants = 0x2c313a, shoes = 0x222222,
+    hair = 0x1a1410, role = 'hero', gun = null,
+  } = opts;
   const g = new THREE.Group();
-  const legL = box(0.17, 0.8, 0.2, pants, -0.11, 0.4, 0);
-  const legR = box(0.17, 0.8, 0.2, pants, 0.11, 0.4, 0);
-  const torso = box(0.46, 0.6, 0.26, shirt, 0, 1.1, 0);
-  const head = box(0.26, 0.26, 0.26, skin, 0, 1.67, 0);
-  const armL = box(0.13, 0.62, 0.15, jacket || shirt, -0.31, 1.12, 0);
-  const armR = box(0.13, 0.62, 0.15, jacket || shirt, 0.31, 1.12, 0);
-  g.add(legL, legR, torso, head, armL, armR);
-  if (jacket) g.add(box(0.48, 0.62, 0.28, jacket, 0, 1.1, 0)); // open jacket shell
-  if (hat) g.add(box(0.3, 0.09, 0.3, hat, 0, 1.84, 0));
-  return { group: g, head, torso, armL, armR, legL, legR, gun: null };
+  const skinMat = lam(skin), shirtMat = lam(shirt), pantsMat = lam(pants),
+        shoeMat = lam(shoes), hairMat = lam(hair);
+
+  // legs: 0.85 tall (feet at 0, hips at 0.85)
+  const legL = part(0.17, 0.85, 0.2, pantsMat, -0.11, 0.425, 0);
+  const legR = part(0.17, 0.85, 0.2, pantsMat, 0.11, 0.425, 0);
+  legL.geometry.translate(0, -0.425, 0); legL.position.y = 0.85;
+  legR.geometry.translate(0, -0.425, 0); legR.position.y = 0.85;
+  const shoeL = part(0.18, 0.1, 0.3, shoeMat, -0.11, 0.05, 0.04);
+  const shoeR = part(0.18, 0.1, 0.3, shoeMat, 0.11, 0.05, 0.04);
+  // torso: 0.55 tall (0.85 -> 1.40)
+  const torso = part(0.52, 0.55, 0.28, shirtMat, 0, 1.125, 0);
+  // arms: 0.6 long, hang from shoulders (1.38)
+  const armL = part(0.13, 0.6, 0.15, shirtMat, -0.33, 1.08, 0);
+  const armR = part(0.13, 0.6, 0.15, shirtMat, 0.33, 1.08, 0);
+  armL.geometry.translate(0, -0.3, 0); armL.position.y = 1.38;
+  armR.geometry.translate(0, -0.3, 0); armR.position.y = 1.38;
+  const handL = part(0.12, 0.1, 0.13, skinMat, -0.33, 0.76, 0);
+  const handR = part(0.12, 0.1, 0.13, skinMat, 0.33, 0.76, 0);
+  // head: 0.26 cube (1.40 -> 1.66) + hair cap; total height ~1.8 with hair
+  const head = part(0.26, 0.26, 0.26, skinMat, 0, 1.53, 0);
+  const hairTop = part(0.28, 0.09, 0.28, hairMat, 0, 1.69, 0);
+  const hairBack = part(0.28, 0.16, 0.08, hairMat, 0, 1.58, -0.11);
+  g.add(legL, legR, shoeL, shoeR, torso, armL, armR, handL, handR, head, hairTop, hairBack);
+  g.userData.legL = legL; g.userData.legR = legR;
+  g.userData.armL = armL; g.userData.armR = armR;
+  g.userData.head = head;
+
+  if (role === 'hero') {
+    // ember-red jacket panels + open collar, dark jeans, SMG in right hand
+    const jacket = part(0.54, 0.4, 0.3, lam(0xb01e24), 0, 1.2, 0);
+    g.add(jacket);
+    const collar = part(0.3, 0.08, 0.3, lam(0x7a1518), 0, 1.42, 0);
+    g.add(collar);
+    const smg = new THREE.Group();
+    smg.add(part(0.07, 0.07, 0.62, lam(0x22262e), 0, 0, 0.18));
+    smg.add(part(0.05, 0.16, 0.05, lam(0x22262e), 0, -0.09, 0.05));
+    smg.add(part(0.05, 0.05, 0.16, lam(0x3a4048), 0, 0.02, 0.48));
+    smg.position.set(0.33, 1.02, 0.28);
+    g.add(smg);
+    g.userData.gun = smg;
+    g.userData.gunTip = new THREE.Object3D();
+    g.userData.gunTip.position.set(0, 0.02, 0.56);
+    smg.add(g.userData.gunTip);
+    armR.rotation.x = -1.15; // gun arm raised forward
+    armL.rotation.x = -0.7;
+  }
+  if (role === 'enemy') {
+    // orange armband + rifle
+    const band = part(0.15, 0.09, 0.17, lam(0xff7a1a, 0xff7a1a, 0.8), -0.33, 1.3, 0);
+    g.add(band);
+    const rifle = new THREE.Group();
+    rifle.add(part(0.06, 0.06, 0.85, lam(0x2c313a), 0, 0, 0.2));
+    rifle.add(part(0.05, 0.14, 0.05, lam(0x2c313a), 0, -0.08, 0.1));
+    rifle.position.set(0.33, 1.05, 0.3);
+    g.add(rifle);
+    g.userData.gun = rifle;
+    g.userData.gunTip = new THREE.Object3D();
+    g.userData.gunTip.position.set(0, 0, 0.62);
+    rifle.add(g.userData.gunTip);
+    armR.rotation.x = -1.05;
+    armL.rotation.x = -0.6;
+  }
+  if (role === 'police') {
+    // navy uniform + peaked cap + badge dot
+    const vest = part(0.54, 0.42, 0.3, lam(0x1d2a4a), 0, 1.18, 0);
+    g.add(vest);
+    const capTop = part(0.3, 0.07, 0.3, lam(0x14203a), 0, 1.7, 0);
+    const capBrim = part(0.3, 0.04, 0.14, lam(0x0e1626), 0, 1.66, 0.16);
+    const badge = part(0.07, 0.07, 0.02, lam(0xffc23a, 0xffc23a, 1.4), -0.14, 1.3, 0.16);
+    g.add(capTop, capBrim, badge);
+  }
+  if (gun === 'smg') {
+    const smg = new THREE.Group();
+    smg.add(part(0.07, 0.07, 0.62, lam(0x22262e), 0, 0, 0.18));
+    smg.position.set(0.33, 1.02, 0.28);
+    g.add(smg);
+    g.userData.gun = smg;
+    g.userData.gunTip = new THREE.Object3D();
+    g.userData.gunTip.position.set(0, 0.02, 0.56);
+    smg.add(g.userData.gunTip);
+    armR.rotation.x = -1.15;
+  }
+  return g;
 }
 
-// Raka — the hero. Ember-red jacket, dark jeans, SMG in his right hand.
-export function buildHero() {
-  const c = buildBody({ skin: 0xd9a066, shirt: 0xf2ead8, pants: 0x2a3550, jacket: 0xd42a1e });
-  // hair
-  c.group.add(box(0.27, 0.09, 0.27, 0x1a1a1a, 0, 1.83, 0));
-  // SMG: dark box + barrel, held forward from the right hand
-  const gun = new THREE.Group();
-  gun.add(box(0.09, 0.12, 0.55, 0x1c1c1c, 0, 0, -0.2));
-  gun.add(box(0.05, 0.05, 0.3, 0x1c1c1c, 0, 0.02, -0.55));
-  gun.add(box(0.07, 0.16, 0.1, 0x1c1c1c, 0, -0.12, 0.05));
-  gun.position.set(0.31, 1.28, -0.3);
-  c.group.add(gun);
-  c.gun = gun;
-  // aim the right arm forward (gun arm)
-  c.armR.rotation.x = -1.35;
-  c.armR.position.set(0.31, 1.32, -0.14);
-  c.group.userData = { ...c, kind: 'hero' };
-  return c.group;
+// Poses: 'idle' | 'walk' (legs swing) | 'fallen' (flat on back, rotation X 90deg).
+export function setPose(ch, pose, phase = 0) {
+  if (pose === 'fallen') {
+    ch.rotation.x = -Math.PI / 2;
+    ch.position.y = 0.16;
+    return;
+  }
+  ch.rotation.x = 0;
+  if (pose === 'walk') {
+    const s = Math.sin(phase) * 0.4;
+    ch.userData.legL.rotation.x = s;
+    ch.userData.legR.rotation.x = -s;
+    ch.userData.armL.rotation.x = -s * 0.7;
+    ch.userData.armR.rotation.x = s * 0.7;
+  } else {
+    ch.userData.legL.rotation.x = 0;
+    ch.userData.legR.rotation.x = 0;
+    ch.userData.armL.rotation.x = 0;
+    if (ch.userData.gun) ch.userData.armR.rotation.x = -1.15;
+    else ch.userData.armR.rotation.x = 0;
+  }
 }
 
-// Syndicate gunman: orange band on the arm, rifle held across the body.
-export function buildEnemy() {
-  const c = buildBody({ skin: 0xc98d5a, shirt: 0x3a3f46, pants: 0x222222, jacket: 0x8a5a2a });
-  c.group.add(box(0.27, 0.09, 0.27, 0x111111, 0, 1.83, 0));
-  // orange gang band on the left arm
-  c.group.add(box(0.15, 0.1, 0.17, 0xe86a1a, -0.31, 1.28, 0));
-  const gun = new THREE.Group();
-  gun.add(box(0.08, 0.1, 0.8, 0x222222, 0, 0, -0.25));
-  gun.add(box(0.05, 0.14, 0.12, 0x222222, 0, -0.1, 0.1));
-  gun.position.set(0.2, 1.25, -0.35);
-  c.group.add(gun);
-  c.gun = gun;
-  c.armR.rotation.x = -1.2;
-  c.armR.position.set(0.31, 1.3, -0.12);
-  c.group.userData = { ...c, kind: 'enemy' };
-  return c.group;
-}
-
-// Selat Bara PD officer: navy uniform, peaked cap, pistol at the hip.
-export function buildPolice() {
-  const c = buildBody({ skin: 0xd9a066, shirt: 0x1a2a55, pants: 0x141c33, hat: 0x0e1530 });
-  c.group.add(box(0.32, 0.05, 0.32, 0x0e1530, 0, 1.86, -0.02)); // cap brim
-  c.group.add(box(0.48, 0.08, 0.28, 0xd8d8d8, 0, 1.28, 0)); // duty belt
-  c.group.userData = { ...c, kind: 'police' };
-  return c.group;
-}
-
-// Pedestrians: three colour variants, no weapons.
-export function buildPedestrian(variant = 0) {
-  const v = [
-    { skin: 0xe8b98a, shirt: 0x4a90c8, pants: 0x5a4a3a },
-    { skin: 0x8a5a3a, shirt: 0xe8e06a, pants: 0x3a3a3a },
-    { skin: 0xd9a066, shirt: 0xc86a9a, pants: 0x2a4a6a },
-  ][variant % 3];
-  const c = buildBody(v);
-  c.group.add(box(0.27, 0.08, 0.27, 0x2a1a0a, 0, 1.83, 0));
-  c.group.userData = { ...c, kind: 'pedestrian', variant };
-  return c.group;
-}
-
-// Lay a character flat (rotation X 90 deg) — a fallen body.
-export function poseFallen(char) {
-  char.rotation.x = -Math.PI / 2;
-  char.position.y = 0.14;
-}
-
-// Flat dark-red blood pool under a fallen body.
-export function buildBloodPool() {
-  const p = box(1.9, 0.03, 1.1, 0x7a0a0a, 0, 0.02, 0);
-  p.receiveShadow = true;
-  return p;
-}
-
-// Drops floating above fallen enemies. Cash gets a big gold "$" built from
-// boxes (procedural geometry only, no textures); ammo gets an upright brass
-// bullet. Both bob and carry a bright glow ring.
-export function buildDrop(kind = 'cash') {
+// --- Drops: cash (green bundle + big gold "$") / ammo (gold box + brass bullet).
+// Box/cylinder geometry only — no textures, no canvas text. userData.bobPhase
+// drives the bob; scenes billboard the drop to face the camera.
+export function buildDrop(kind) {
   const g = new THREE.Group();
-  const ringMat = L(kind === 'cash' ? 0x2aff66 : 0xffc81a, 2.0);
-  const ring = new THREE.Mesh(new THREE.TorusGeometry(0.8, 0.07, 8, 24), ringMat);
+  const ring = new THREE.Mesh(
+    new THREE.TorusGeometry(0.8, 0.05, 6, 24),
+    lam(0xffc23a, 0xffc23a, 2.0),
+  );
   ring.rotation.x = Math.PI / 2;
-  ring.position.y = 0.1;
+  ring.position.y = -0.55;
   g.add(ring);
   if (kind === 'cash') {
-    // green cash bundle
-    g.add(box(0.9, 0.3, 0.55, 0x1a8a3a, 0, 0.35, 0));
-    g.add(box(0.92, 0.1, 0.57, 0xf2ead8, 0, 0.35, 0));
-    // big gold "$" glyph from chunky boxes, floating above the bundle
-    const gold = L(0xffc81a, 2.6);
-    const s = new THREE.Group();
-    const bar = (w, x, y) => s.add(box(w, 0.14, 0.1, 0, x, y, 0, gold));
-    bar(0.62, 0, 0.42); // top bar
-    bar(0.62, 0, 0); // middle bar
-    bar(0.62, 0, -0.42); // bottom bar
-    s.add(box(0.14, 0.34, 0.1, 0, -0.24, 0.21, 0, gold)); // upper-left stem
-    s.add(box(0.14, 0.34, 0.1, 0, 0.24, -0.21, 0, gold)); // lower-right stem
-    s.add(box(0.12, 1.1, 0.1, 0, 0, 0, 0, gold)); // vertical spine
-    s.position.y = 1.15;
-    s.scale.setScalar(1.15);
-    g.add(s);
-    g.userData.marker = s;
+    const bundle = part(0.62, 0.26, 0.4, lam(0x2a9e4f), 0, 0, 0);
+    const strap = part(0.64, 0.28, 0.12, lam(0x1d7a38), 0, 0, 0);
+    g.add(bundle, strap);
+    // big gold "$": chunky box-built glyph, emissive, floats above the bundle
+    const gold = lam(0xffc23a, 0xffc23a, 2.6);
+    const dollar = new THREE.Group();
+    dollar.add(part(0.62, 0.13, 0.06, gold, 0, 0.34, 0));       // top bar
+    dollar.add(part(0.13, 0.2, 0.06, gold, -0.24, 0.22, 0));    // upper-left stem
+    dollar.add(part(0.62, 0.13, 0.06, gold, 0, 0.1, 0));        // middle bar
+    dollar.add(part(0.13, 0.2, 0.06, gold, 0.24, -0.02, 0));    // lower-right stem
+    dollar.add(part(0.62, 0.13, 0.06, gold, 0, -0.14, 0));      // bottom bar
+    dollar.add(part(0.16, 0.98, 0.07, gold, 0, 0.1, 0.01));     // spine, thick + sticking out top and bottom
+    dollar.position.y = 0.85;
+    g.add(dollar);
+    g.userData.marker = dollar;
   } else {
-    // gold ammo box
-    g.add(box(0.85, 0.35, 0.55, 0xc89a1a, 0, 0.38, 0));
-    g.add(box(0.87, 0.08, 0.57, 0x8a6a10, 0, 0.38, 0));
+    const crate = part(0.55, 0.4, 0.55, lam(0xd9a83c, 0xd9a83c, 0.7), 0, 0, 0);
+    const lid = part(0.57, 0.08, 0.57, lam(0xb8892e), 0, 0.24, 0);
+    g.add(crate, lid);
     // upright brass bullet: cylinder body + pale cone tip + rim
-    const brass = L(0xd8a018, 1.8);
-    const body = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.16, 0.6, 10), brass);
-    body.position.y = 0.95;
-    const tip = new THREE.Mesh(new THREE.ConeGeometry(0.16, 0.35, 10), L(0xf2ead8, 1.2));
-    tip.position.y = 1.42;
-    const rim = new THREE.Mesh(new THREE.CylinderGeometry(0.19, 0.19, 0.08, 10), brass);
-    rim.position.y = 0.68;
-    g.add(body, tip, rim);
-    g.userData.marker = body;
+    const bullet = new THREE.Group();
+    const body = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.11, 0.42, 10), lam(0xd9a83c, 0xd9a83c, 1.2));
+    body.position.y = 0.21;
+    const tip = new THREE.Mesh(new THREE.ConeGeometry(0.11, 0.26, 10), lam(0xf2e3c6, 0xf2e3c6, 0.9));
+    tip.position.y = 0.55;
+    const rim = new THREE.Mesh(new THREE.CylinderGeometry(0.13, 0.13, 0.06, 10), lam(0x8a6a22));
+    rim.position.y = 0.03;
+    bullet.add(body, tip, rim);
+    bullet.position.y = 0.28;
+    g.add(bullet);
+    g.userData.marker = bullet;
   }
-  g.userData = { ...g.userData, kind: 'drop', dropKind: kind, baseY: 1.3, ring };
+  g.userData.bobPhase = Math.random() * 6;
+  g.userData.baseY = 1.3;
+  g.scale.setScalar(2.0);
   return g;
 }
