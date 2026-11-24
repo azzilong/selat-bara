@@ -26,6 +26,10 @@
 //     NEXT + progress, district + standing, named police response with
 //     live distances, weapon slots, money with the clock, vehicle +
 //     damage, gold minimap route.
+// FIX #12 (2026-11-24 ~08:05 WIB): drops carry a big gold "$" (cash)
+//     / bullet (ammo) marker above the box, and updateStaged billboards
+//     the drop to face the camera instead of spinning, so the marker
+//     reads at capture time.
 import * as THREE from 'three';
 import {
   buildSportsCar, buildPoliceCar, buildHelicopter, buildSedan,
@@ -454,7 +458,15 @@ export function updateStaged(ctx, dt, time) {
   if (ctx.drops) {
     for (const d of ctx.drops) {
       d.position.y = d.userData.baseY + Math.sin(time * 2 + d.userData.phase) * 0.12;
-      d.rotation.y += dt * 1.2;
+      // FIX #12: face the camera instead of spinning — the "$" / bullet
+      // marker must read at capture time, not spin away from the lens.
+      if (ctx.camera) {
+        d.rotation.y = Math.atan2(
+          ctx.camera.position.x - d.position.x,
+          ctx.camera.position.z - d.position.z);
+      } else {
+        d.rotation.y += dt * 1.2;
+      }
     }
   }
 }

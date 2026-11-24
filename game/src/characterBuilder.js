@@ -167,6 +167,53 @@ export function buildPedestrian(variant = 0) {
 // pale band) or ammo box (gold), plus a glowing ring on the ground
 // below it so the eye finds it in a busy frame. The scene bobs it via
 // userData.baseY in updateStaged; kind: 'cash' | 'ammo'.
+// FIX #12 (user 2026-11-24 ~08:05 WIB: the drops read as plain boxes):
+// each drop now carries a big marker built from boxes/cylinders only
+// (no textures) — a gold "$" floating above the cash bundle, and a
+// gold bullet standing on the ammo box — gold emissive so it reads at
+// street distance. updateStaged billboards the whole drop to face the
+// camera (no more spin) so the marker never turns away at capture time.
+const MARKER_MAT = new THREE.MeshLambertMaterial({
+  color: 0xffd24a, emissive: 0xffc400, emissiveIntensity: 2.6 });
+const BULLET_TIP_MAT = new THREE.MeshLambertMaterial({
+  color: 0xfff2c0, emissive: 0xffffff, emissiveIntensity: 2.0 });
+
+// "$" glyph from boxes, in the XY plane facing +Z: top bar, upper-left
+// stem, middle bar, lower-right stem, bottom bar, vertical spine that
+// pokes out top and bottom. Chunky bars (0.14) so it reads at ~25u.
+function buildDollarMark(mat) {
+  const g = new THREE.Group();
+  const bar = (sx, sy, x, y) => part(g, unitBox, mat, sx, sy, 0.1, x, y, 0);
+  bar(0.6, 0.14, 0, 0.98);      // top bar
+  bar(0.14, 0.34, -0.23, 0.81); // upper-left stem
+  bar(0.6, 0.14, 0, 0.64);      // middle bar
+  bar(0.14, 0.34, 0.23, 0.47);  // lower-right stem
+  bar(0.6, 0.14, 0, 0.30);      // bottom bar
+  bar(0.14, 1.0, 0, 0.64);      // spine through the middle
+  return g;
+}
+
+// One bullet standing upright: brass body + pale pointed tip + rim.
+function buildBulletMark() {
+  const g = new THREE.Group();
+  const rim = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.16, 0.16, 0.1, 12), MAT(0x8a5a00));
+  rim.position.set(0, 0.22, 0);
+  rim.castShadow = false;
+  g.add(rim);
+  const body = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.11, 0.11, 0.45, 12), MARKER_MAT);
+  body.position.set(0, 0.5, 0);
+  body.castShadow = false;
+  g.add(body);
+  const tip = new THREE.Mesh(
+    new THREE.ConeGeometry(0.11, 0.24, 12), BULLET_TIP_MAT);
+  tip.position.set(0, 0.85, 0);
+  tip.castShadow = false;
+  g.add(tip);
+  return g;
+}
+
 export function buildDrop(kind = 'cash') {
   const g = new THREE.Group();
   const cash = kind === 'cash';
@@ -180,9 +227,11 @@ export function buildDrop(kind = 'cash') {
   if (cash) {
     const band = part(g, unitBox, MAT(0xe8e8d8), 0.57, 0.12, 0.4, 0, 0, 0);
     band.castShadow = false;
+    g.add(buildDollarMark(MARKER_MAT)); // FIX #12: big gold "$" above
   } else {
     const lid = part(g, unitBox, MAT(0x8a5a00), 0.57, 0.08, 0.4, 0, 0.18, 0);
     lid.castShadow = false;
+    g.add(buildBulletMark()); // FIX #12: gold bullet above the box
   }
   // glow ring flat on the ground under the drop (added to the group at
   // -baseY by the caller; here it sits at y=0 relative to the drop and
